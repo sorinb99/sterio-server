@@ -530,3 +530,7 @@ A linked DSD track converted to PCM for a streamer no longer waits for the whole
 ### 0.1.52: Sterio look and addresses without https://
 
 The dashboard uses the Sterio colours (Petrol & Peach) and logo, with the logo as its browser icon. The Mac server has its own peach icon. A linked server's address can be typed without `https://` or a port: the server tries HTTPS first, then HTTP, each also on port 7766, and keeps the first address where a Sterio server answers.
+
+### 0.1.53: the ribbon logo and a menu bar item on the Mac
+
+The Sterio logo is now the ribbon S, on the dashboard (and as its browser icon) and on the Mac server's peach icon. The Mac server puts the Sterio mark in the menu bar; its menu shows whether the server runs, the library (albums, tracks, devices, scanning), the address phones use (click to copy), and Open Dashboard, Choose Music Folder, Show Music in Finder, Open at Login (macOS 13 and later), Show Server Log and Quit. A folder chosen there restarts the server with it, like one chosen on the dashboard.

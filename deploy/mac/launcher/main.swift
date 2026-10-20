@@ -1,13 +1,16 @@
 import AppKit
+import ServiceManagement
 
 // Sterio Server for Mac. While the app is open the server runs; quitting
 // the app stops it. Everything it knows (music folder, paired phones, library)
 // stays in ~/Library/Application Support/Sterio Server between launches.
 // Each launch, and a click on the Dock icon, opens the dashboard in the browser.
+// The Sterio mark in the menu bar shows whether the server runs, its library
+// and the address phones use, with the dashboard, music folder and Quit.
 // The same app runs from the DMG and, sandboxed, from the Mac App Store: the
 // launcher shows the folder window and keeps a security-scoped bookmark, and
 // the server it starts inherits the access to that folder.
-final class Server: NSObject, NSApplicationDelegate {
+final class Server: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let dashboard = URL(string: "http://127.0.0.1:7767/")!
   private var process: Process?
   private var stopping = false
@@ -17,6 +20,9 @@ final class Server: NSObject, NSApplicationDelegate {
   private var output = Data()
   private var folderAccess: URL?
   private var dashboardShown = Date.distantPast
+  private var restarting = false
+  private var statusItem: NSStatusItem?
+  private var summary = "Starting…"
   private let sandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
   private let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Sterio Server")
   private let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/Sterio Server")
@@ -38,6 +44,7 @@ final class Server: NSObject, NSApplicationDelegate {
       try? files.createDirectory(at: folder, withIntermediateDirectories: true)
     }
     buildMenu()
+    buildStatusItem()
     // The Mac stays awake for the phones while the server runs; the display may sleep.
     awake = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled], reason: "Sterio Server is sharing music")
     start()
@@ -178,6 +185,7 @@ final class Server: NSObject, NSApplicationDelegate {
     process = nil
     input = nil
     if stopping { return }
+    if restarting { restarting = false; return start() }
     if status != 75 {
       failures = failures.filter { $0.timeIntervalSinceNow > -60 } + [Date()]
       if failures.count >= 5 {
@@ -225,6 +233,116 @@ final class Server: NSObject, NSApplicationDelegate {
     NSApp.mainMenu = main
   }
   @objc private func openDashboard() { NSWorkspace.shared.open(dashboard) }
+
+  // The menu bar: the Sterio mark (a template image, so it follows the menu
+  // bar's colour). Its menu is rebuilt each time it opens.
+  private func buildStatusItem() {
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    let image = Bundle.main.image(forResource: "MenuBarIcon")
+    image?.isTemplate = true
+    image?.size = NSSize(width: 18, height: 18)
+    item.button?.image = image
+    item.button?.toolTip = "Sterio Server"
+    let menu = NSMenu()
+    menu.delegate = self
+    item.menu = menu
+    statusItem = item
+  }
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    menu.removeAllItems()
+    let running = process?.isRunning == true
+    let title = NSMenuItem(title: running ? "Sterio Server is running" : "Sterio Server is starting…", action: nil, keyEquivalent: "")
+    title.image = NSImage(systemSymbolName: running ? "circle.fill" : "circle.dotted", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(paletteColors: [running ? .systemGreen : .systemOrange]))
+    menu.addItem(title)
+    menu.addItem(withTitle: summary, action: nil, keyEquivalent: "")
+    if let address = phoneAddress() {
+      let copy = NSMenuItem(title: "Phones connect to \(address)", action: #selector(copyAddress(_:)), keyEquivalent: "")
+      copy.representedObject = address
+      copy.toolTip = "Click to copy"
+      copy.target = self
+      menu.addItem(copy)
+    }
+    menu.addItem(.separator())
+    add(menu, "Open Dashboard", #selector(openDashboard), "o")
+    menu.addItem(.separator())
+    let folder = musicFolder()
+    menu.addItem(withTitle: "Music: " + (folder.map { FileManager.default.displayName(atPath: $0) } ?? "no folder chosen"), action: nil, keyEquivalent: "")
+    add(menu, "Choose Music Folder…", #selector(chooseFromMenu), "")
+    if folder != nil { add(menu, "Show Music in Finder", #selector(showMusic), "") }
+    menu.addItem(.separator())
+    if #available(macOS 13.0, *) {
+      let login = add(menu, "Open at Login", #selector(toggleLogin), "")
+      login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+    add(menu, "Show Server Log", #selector(showLog), "l")
+    menu.addItem(.separator())
+    add(menu, "Quit Sterio Server", #selector(NSApplication.terminate(_:)), "q").target = NSApp
+    refreshSummary()
+  }
+  @discardableResult private func add(_ menu: NSMenu, _ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
+    let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+    item.target = self
+    return item
+  }
+  // The library line comes from the dashboard; it shows on the next opening.
+  private func refreshSummary() {
+    var request = URLRequest(url: dashboard.appendingPathComponent("api/status"))
+    request.timeoutInterval = 2
+    URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+      guard let data, let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+      let number = { (key: String) in NumberFormatter.localizedString(from: (status[key] as? NSNumber) ?? 0, number: .decimal) }
+      let scanning = (status["scan"] as? [String: Any])?["running"] as? Bool == true
+      let line = "\(number("albums")) albums · \(number("tracks")) tracks · \(number("devices")) devices" + (scanning ? " · scanning" : "")
+      DispatchQueue.main.async { self?.summary = line }
+    }.resume()
+  }
+  // The address of this Mac on the local network, as phones type it.
+  private func phoneAddress() -> String? {
+    var list: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&list) == 0, let first = list else { return nil }
+    defer { freeifaddrs(list) }
+    for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+      let entry = pointer.pointee
+      guard let address = entry.ifa_addr, address.pointee.sa_family == UInt8(AF_INET),
+            String(cString: entry.ifa_name).hasPrefix("en") else { continue }
+      var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+      guard getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
+      let ip = String(cString: host)
+      if ip.hasPrefix("192.168.") || ip.hasPrefix("10.") || ip.range(of: #"^172\.(1[6-9]|2\d|3[01])\."#, options: .regularExpression) != nil { return ip }
+    }
+    return nil
+  }
+  @objc private func copyAddress(_ sender: NSMenuItem) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(sender.representedObject as? String ?? "", forType: .string)
+  }
+  @objc private func showMusic() {
+    if let folder = musicFolder() { NSWorkspace.shared.open(URL(fileURLWithPath: folder)) }
+  }
+  // A folder chosen here is saved like one chosen on the dashboard; the
+  // server then starts again with it.
+  @objc private func chooseFromMenu() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.message = "Choose the folder with your music"
+    panel.prompt = "Choose"
+    NSApp.activate(ignoringOtherApps: true)
+    guard panel.runModal() == .OK, let url = panel.url,
+          let bookmark = try? url.bookmarkData(options: sandboxed ? [.withSecurityScope, .securityScopeAllowOnlyReadAccess] : [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
+    var saved = settings()
+    saved["musicDir"] = url.path
+    saved["bookmark"] = bookmark.base64EncodedString()
+    save(saved)
+    if let process, process.isRunning { restarting = true; process.terminate() } else { start() }
+  }
+  @available(macOS 13.0, *)
+  @objc private func toggleLogin() {
+    let service = SMAppService.mainApp
+    do { if service.status == .enabled { try service.unregister() } else { try service.register() } }
+    catch { NSSound.beep() }
+  }
   @objc private func showLog() { NSWorkspace.shared.open(logs.appendingPathComponent("server.log")) }
   func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
     let menu = NSMenu()

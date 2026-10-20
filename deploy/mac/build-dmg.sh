@@ -89,6 +89,8 @@ cp -R "$root/src" "$app/Contents/Resources/server/src"
 cp "$root/package.json" "$app/Contents/Resources/server/package.json"
 # Trusted certificates for FFmpeg reading a linked server over HTTPS.
 cp /etc/ssl/cert.pem "$app/Contents/Resources/server/cacert.pem"
+# The Sterio mark for the menu bar (a template image).
+cp "$here/MenuBarIcon.png" "$here/MenuBarIcon@2x.png" "$app/Contents/Resources/"
 find "$app" -name .DS_Store -delete
 
 for arch in arm64 x86_64; do

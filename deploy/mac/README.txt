@@ -55,6 +55,11 @@ Asta faci o singură dată pe fiecare telefon.
 ----------------
 - Cât timp aplicația e deschisă (iconița ei e în Dock), muzica merge pe
   telefon. Închide-o cu Quit (Cmd+Q) când nu mai asculți: serverul se oprește.
+- Sus, în bara de meniu, logo-ul Sterio arată că serverul merge. Un clic pe
+  el arată starea, câte albume și piese ai, adresa pentru telefoane (clic ca
+  s-o copiezi), plus: Open Dashboard, Choose Music Folder, Show Music in
+  Finder, Open at Login (pornește singur când pornești Mac-ul), Show Server
+  Log și Quit.
 - Data viitoare când o deschizi, ține minte tot: folderul, telefoanele
   și muzica deja citită.
 - Pagina din browser se deschide la fiecare pornire. Dacă ai închis-o, apasă
