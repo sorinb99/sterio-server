@@ -79,16 +79,24 @@ export function removePeerClient(deviceId) {
 // yet, or "declined".
 try { db.exec("ALTER TABLE peers ADD COLUMN pending TEXT NOT NULL DEFAULT ''"); } catch {}
 const peerRow = id => db.prepare('SELECT * FROM peers WHERE id=?').get(id);
-function baseUrl(input) {
+// The addresses to try for what was typed: as written when it names http or
+// https, otherwise HTTPS first and then HTTP, each also on 7766 without a port.
+function baseUrls(input) {
   let value = String(input || '').trim();
   const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
-  if (!scheme) value = 'http://' + value;
+  if (!scheme) value = 'https://' + value;
   let url;
-  try { url = new URL(value); } catch { throw new HttpError(400, 'Enter the server address, for example 192.168.1.20:7766 or https://music.example.com'); }
+  try { url = new URL(value); } catch { throw new HttpError(400, 'Enter the server address, for example 192.168.1.20 or music.example.com'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || !url.hostname) throw new HttpError(400, 'Enter an http or https server address without credentials');
-  // A bare address means the server's default port.
-  if (!scheme && !url.port) url.port = '7766';
-  return url.origin + url.pathname.replace(/\/+$/, '').replace(/\/v1\/info$/, '');
+  const base = u => u.origin + u.pathname.replace(/\/+$/, '').replace(/\/v1\/info$/, '');
+  if (scheme) return [base(url)];
+  const found = [];
+  for (const protocol of ['https:', 'http:'])
+    for (const port of url.port ? [url.port] : ['', '7766']) {
+      const candidate = new URL(url); candidate.protocol = protocol; candidate.port = port;
+      found.push(base(candidate));
+    }
+  return [...new Set(found)];
 }
 const sessions = new Map(), signIns = new Map();
 async function send(peer, route, { method = 'GET', body, headers = {}, token, timeout = 15000 } = {}) {
@@ -97,7 +105,7 @@ async function send(peer, route, { method = 'GET', body, headers = {}, token, ti
       headers: { ...headers, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body) });
   } catch (error) {
-    throw new HttpError(502, error.name === 'TimeoutError' ? `${peer.name || peer.url} did not answer in time` : `Could not reach ${peer.name || peer.url}. Check the address (use https:// when the server is behind HTTPS).`);
+    throw new HttpError(502, error.name === 'TimeoutError' ? `${peer.name || peer.url} did not answer in time` : `Could not reach ${peer.name || peer.url}. Check the address.`);
   }
 }
 async function answer(response, peer) {
@@ -174,11 +182,19 @@ export function syncPeer(id, { force = false } = {}) {
   return job;
 }
 export async function connectPeer(input) {
-  const url = baseUrl(input.url), code = String(input.code || '').trim().toLowerCase();
+  const urls = baseUrls(input.url), code = String(input.code || '').trim().toLowerCase();
   if (code && !/^[a-f0-9]{16}$/.test(code)) throw new HttpError(400, 'Enter the 16-character server key generated on the other server, or leave it empty to send a connection request');
-  const probe = { id: '', url, name: '' };
-  const info = await answer(await send(probe, '/v1/info', { timeout: 10000 }), probe);
-  if (info.provider !== 'sterio' || typeof info.serverId !== 'string') throw new HttpError(502, 'That address is not a Sterio server');
+  // The first address where a Sterio server answers.
+  let url, info, failure;
+  for (const candidate of urls) {
+    const probe = { id: '', url: candidate, name: '' };
+    try {
+      const value = await answer(await send(probe, '/v1/info', { timeout: urls.length > 1 ? 6000 : 10000 }), probe);
+      if (value.provider === 'sterio' && typeof value.serverId === 'string') { url = candidate; info = value; break; }
+      failure ??= new HttpError(502, 'That address is not a Sterio server');
+    } catch (error) { failure ??= error; }
+  }
+  if (!url) throw failure;
   if (info.serverId === serverId) throw new HttpError(400, 'That address is this server');
   if (!info.peers) throw new HttpError(409, 'Update the other server to Sterio Server 0.1.28 or later first');
   const peer = { id: info.serverId, url, name: text(info.name, 80) || 'Sterio server' };

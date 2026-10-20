@@ -491,7 +491,7 @@ The app now records each Sterio Server connection attempt in its exported diagno
 
 With linked servers, the server an app or a network streamer is connected to now makes every conversion decision for tracks of the other library: DSD → PCM FLAC, formats that need conversion, standalone FLAC for CUE chapters and FLAC repacking for Apple players. It asks the other server only for the original file (`sourceOnly`) and converts it itself, with FFmpeg reading the original over HTTP; the result is kept in its own cache. The server that shares its library only serves files and never converts for listeners of another server. A server in the middle of a chain passes the original on unchanged. Servers before 0.1.43 may still repack short-frame FLAC before sending it; that output is used as is.
 
-The Mac server also has a Mac App Store build (`deploy/mac/build-dmg.sh --app-store`): sandboxed, with the music folder chosen in the app's own folder window and kept as a security-scoped bookmark, Node/FFmpeg/metaflac in `Contents/Helpers`, and an icon with inverted colours to tell it apart from the Sterio app.
+The Mac server also has a Mac App Store build (`deploy/mac/build-dmg.sh --app-store`): sandboxed, with the music folder chosen in the app's own folder window and kept as a security-scoped bookmark, Node/FFmpeg/metaflac in `Contents/Helpers`, and its own peach icon (`deploy/mac/AppIcon.appiconset`, drawn by `../sterio/scripts/generate-icon.swift --variant=server --style=macos`) to tell it apart from the Sterio app.
 
 ## 0.1.44: connect with the address only, accept on the server
 
@@ -526,3 +526,7 @@ Every device paired for remote control sees the others in its pulse (`linked`: i
 Stream URLs given to network streamers end in the file's extension (`/v1/stream/<id>.flac?ticket=…`, `.dsf`, `.dff`, …) and cover art in `.jpg`; the server accepts and ignores the extension. Streamers such as Eversolo name the format from the extension, so a FLAC no longer shows as "PCM". Cover art carries `dlna:profileID="JPEG_TN"` for renderers that require it.
 
 A linked DSD track converted to PCM for a streamer no longer waits for the whole original to download: once the conversion has 15 seconds of audio and runs at least 1.25× faster than playback, the streamer gets the file as it grows (no length, no seeking until it is complete). Apps still wait for the finished file, which they seek with byte ranges. Linked conversions may run up to 60 minutes (15 for local files).
+
+### 0.1.52: Sterio look and addresses without https://
+
+The dashboard uses the Sterio colours (Petrol & Peach) and logo, with the logo as its browser icon. The Mac server has its own peach icon. A linked server's address can be typed without `https://` or a port: the server tries HTTPS first, then HTTP, each also on port 7766, and keeps the first address where a Sterio server answers.

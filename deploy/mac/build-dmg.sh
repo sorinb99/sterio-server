@@ -97,13 +97,10 @@ done
 lipo -create "$work/launcher-arm64" "$work/launcher-x86_64" -output "$app/Contents/MacOS/Sterio Server"
 sed -e "s/__VERSION__/$version/g" -e "s/__BUILD__/$build/g" "$here/Info.plist" > "$app/Contents/Info.plist"
 
-# The Sterio icon with inverted colours, compiled into Assets.car and AppIcon.icns.
-swiftc -O -o "$work/invert-icon" "$here/invert-icon.swift"
-catalog="$stage-Assets.xcassets"; mkdir -p "$catalog/AppIcon.appiconset"
+# The Sterio Server icon (peach), compiled into Assets.car and AppIcon.icns.
+catalog="$stage-Assets.xcassets"; mkdir -p "$catalog"
 echo '{"info":{"version":1,"author":"xcode"}}' > "$catalog/Contents.json"
-source_icons="$root/../sterio/macos/sterio-macOS/Assets.xcassets/AppIcon.appiconset"
-cp "$source_icons/Contents.json" "$catalog/AppIcon.appiconset/"
-for icon in "$source_icons"/*.png; do "$work/invert-icon" "$icon" "$catalog/AppIcon.appiconset/$(basename "$icon")"; done
+cp -R "$here/AppIcon.appiconset" "$catalog/"
 xcrun actool "$catalog" --compile "$app/Contents/Resources" --platform macosx --minimum-deployment-target 12.0 \
   --app-icon AppIcon --output-partial-info-plist "$stage-assets.plist" > "$work/actool.log"
 
