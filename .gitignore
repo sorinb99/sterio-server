@@ -1,0 +1,10 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+/dist/
+/data/
+/certs/
+/work/
+node_modules/
+*.log

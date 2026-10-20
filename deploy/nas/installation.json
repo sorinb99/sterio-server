@@ -1,0 +1,20 @@
+{
+  "installedOn": "2026-10-16",
+  "host": "192.168.50.90",
+  "directory": "/volume1/docker/sterio-server",
+  "url": "http://192.168.50.90:7766",
+  "music": "/volume2/data/media/music",
+  "musicReadOnly": true,
+  "image": "sterio-server:0.1.2",
+  "imageArchiveSha256": "0833502602089069a134e39029ba32e517098dcde332c248e90431ab1c49e300",
+  "uid": 1000,
+  "gid": 100,
+  "internetProxyConfigured": true,
+  "portForwardingConfigured": false,
+  "playbackTestsRun": false,
+  "publicUrl": "https://sterio.filmescu.ro",
+  "proxyHostId": 5,
+  "proxyCertificateId": 7,
+  "httpsVerifiedOn": "2026-10-16",
+  "portForwardingNote": "Reuses existing reverse proxy ingress; no router rules changed by this deployment."
+}

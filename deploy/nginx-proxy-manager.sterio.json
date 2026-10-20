@@ -1,0 +1,22 @@
+{
+  "domain_names": ["sterio.filmescu.ro"],
+  "forward_scheme": "http",
+  "forward_host": "192.168.50.90",
+  "forward_port": 7766,
+  "access_list_id": 0,
+  "caching_enabled": false,
+  "block_exploits": true,
+  "allow_websocket_upgrade": false,
+  "http2_support": true,
+  "hsts_subdomains": false,
+  "advanced_config": "access_log off;\nerror_log /dev/null crit;\nproxy_buffering off;\nproxy_request_buffering off;\nproxy_read_timeout 900s;\nproxy_send_timeout 900s;\nsend_timeout 900s;\nclient_max_body_size 32k;",
+  "locations": [
+    {
+      "path": "/",
+      "forward_scheme": "http",
+      "forward_host": "192.168.50.90",
+      "forward_port": 7766,
+      "advanced_config": "proxy_http_version 1.1;\naccess_log off;\nerror_log /dev/null crit;"
+    }
+  ]
+}

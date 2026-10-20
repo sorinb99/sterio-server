@@ -1,0 +1,35 @@
+services:
+  sterio:
+    image: sterio-server:0.1.51
+    build: .
+    container_name: sterio
+    restart: unless-stopped
+    init: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${HOST_PORT:-7766}:7766"
+      - "${ADMIN_BIND_IP:-127.0.0.1}:${ADMIN_HOST_PORT:-7767}:7767"
+    environment:
+      SERVER_NAME: "${SERVER_NAME:-Sterio NAS}"
+      PORT: "7766"
+      ADMIN_ENABLED: "${ADMIN_ENABLED:-false}"
+      ADMIN_PORT: "7767"
+      ADMIN_ALLOWED_NETWORKS: "${ADMIN_ALLOWED_NETWORKS:-}"
+      ADMIN_ALLOWED_HOSTS: "${ADMIN_ALLOWED_HOSTS:-127.0.0.1:7767,localhost:7767}"
+      MUSIC_DIR: /music
+      DATA_DIR: /data
+      BASE_PATH: "${BASE_PATH:-}"
+      SCAN_INTERVAL_SECONDS: "${SCAN_INTERVAL_SECONDS:-900}"
+      MAX_PCM_RATE: "${MAX_PCM_RATE:-192000}"
+      CACHE_MAX_MB: "${CACHE_MAX_MB:-4096}"
+      TRANSCODE_WORKERS: "${TRANSCODE_WORKERS:-}"
+    volumes:
+      - "${MUSIC_PATH:?Set MUSIC_PATH in .env}:/music:${MUSIC_ACCESS:-ro}"
+      - "${DATA_PATH:?Set DATA_PATH in .env}:/data"
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s

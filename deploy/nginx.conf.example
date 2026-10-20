@@ -1,0 +1,18 @@
+# Inside an HTTPS server{} for music.example.com with a valid TLS certificate.
+# Proxy to the NAS's private address. Keep the upstream port private to your LAN.
+location / {
+    proxy_pass http://192.168.1.10:7766;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_buffering off;
+    proxy_read_timeout 900s;
+    proxy_send_timeout 900s;
+    client_max_body_size 32k;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    # Stream URLs contain short-lived scoped tickets. Do not log query strings.
+    access_log off;
+}
+# For a subpath, set BASE_PATH=/sterio on the container and use
+# location /sterio/ { proxy_pass http://192.168.1.10:7766; ... }
+# Keep proxy_pass without a trailing slash so the prefix is preserved.

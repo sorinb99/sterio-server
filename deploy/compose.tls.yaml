@@ -1,0 +1,11 @@
+# Use with: docker compose -f compose.yaml -f deploy/compose.tls.yaml up -d
+# CERTS_PATH must contain fullchain.pem and privkey.pem for a trusted domain.
+services:
+  sterio:
+    environment:
+      TLS_CERT_FILE: /certs/fullchain.pem
+      TLS_KEY_FILE: /certs/privkey.pem
+    volumes:
+      - "${CERTS_PATH:?Set CERTS_PATH in .env}:/certs:ro"
+    healthcheck:
+      test: ["CMD", "node", "--input-type=module", "-e", "import tls from 'node:tls'; const s=tls.connect({host:'127.0.0.1',port:7766,rejectUnauthorized:false},()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),4000)"]

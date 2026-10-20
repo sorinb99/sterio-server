@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key><string>Sterio Server</string>
+	<key>CFBundleDisplayName</key><string>Sterio Server</string>
+	<key>CFBundleIdentifier</key><string>com.sorinbottea.sterio.server</string>
+	<key>CFBundleExecutable</key><string>Sterio Server</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
+	<key>CFBundleIconName</key><string>AppIcon</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>__VERSION__</string>
+	<key>CFBundleVersion</key><string>__BUILD__</string>
+	<key>LSMinimumSystemVersion</key><string>12.0</string>
+	<key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>ITSAppUsesNonExemptEncryption</key><false/>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+	<key>NSHumanReadableCopyright</key><string>Sterio</string>
+	<key>NSLocalNetworkUsageDescription</key><string>Sterio Server shares your music with Sterio on phones and finds network streamers on this network.</string>
+	<key>NSDocumentsFolderUsageDescription</key><string>Sterio Server reads the music folder you chose.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>Sterio Server reads the music folder you chose.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>Sterio Server reads the music folder you chose.</string>
+	<key>NSRemovableVolumesUsageDescription</key><string>Sterio Server reads the music folder you chose on this drive.</string>
+	<key>NSNetworkVolumesUsageDescription</key><string>Sterio Server reads the music folder you chose on this network drive.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Sterio Server shows the window where you choose your music folder.</string>
+</dict>
+</plist>

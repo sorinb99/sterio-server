@@ -1,0 +1,11 @@
+# Install beside the NAS compose.yaml as compose.override.yaml.
+# Shared WireGuard network avoids trusting a general Docker NAT gateway.
+services:
+  sterio:
+    networks:
+      default:
+        ipv4_address: 172.19.0.250
+networks:
+  default:
+    external: true
+    name: wg-easy_default

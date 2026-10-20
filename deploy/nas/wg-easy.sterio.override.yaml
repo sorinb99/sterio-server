@@ -1,0 +1,19 @@
+# Merge into wg-easy's compose.override.yaml (NAS deployment only).
+services:
+  wg-easy:
+    networks:
+      default:
+        ipv4_address: 172.19.0.2
+    environment:
+      WG_POST_UP: >-
+        iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o eth0 -j MASQUERADE;
+        iptables -A INPUT -p udp -m udp --dport 51820 -j ACCEPT;
+        iptables -A FORWARD -i wg0 -j ACCEPT;
+        iptables -A FORWARD -o wg0 -j ACCEPT;
+        iptables -t nat -A PREROUTING -i wg0 -s 10.8.0.0/24 -d 192.168.50.90/32 -p tcp --dport 7767 -j DNAT --to-destination 172.19.0.250:7767;
+      WG_POST_DOWN: >-
+        iptables -t nat -D PREROUTING -i wg0 -s 10.8.0.0/24 -d 192.168.50.90/32 -p tcp --dport 7767 -j DNAT --to-destination 172.19.0.250:7767;
+        iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o eth0 -j MASQUERADE;
+        iptables -D INPUT -p udp -m udp --dport 51820 -j ACCEPT;
+        iptables -D FORWARD -i wg0 -j ACCEPT;
+        iptables -D FORWARD -o wg0 -j ACCEPT;
