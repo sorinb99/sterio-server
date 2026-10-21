@@ -114,9 +114,10 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
   `README.txt` and the tar.gz.
 - NAS deploy (`sorinb99@192.168.50.90`, `/volume1/docker/sterio-server`,
   data `/volume1/docker/sterio-server/data`, music `/volume2/data/media/music`).
-  **The user runs it**, never run it yourself:
-  `cd /Users/sorinbottea/projects/sterio-server && COPYFILE_DISABLE=1 tar cf - src package.json compose.yaml | ssh sorinb99@192.168.50.90 'cd /volume1/docker/sterio-server && tar xf - && docker compose up -d --build'`.
-  Afterwards `docker logs --tail 30 sterio` over ssh is fine to check the start.
+  Run `work/deploy-nas.sh` (allowed for the agent since 2026-10-21; it
+  copies `src`, `package.json`, `compose.yaml`, runs
+  `docker compose up -d --build` and prints the last log lines). Deploy after
+  every server change. Any other change on the NAS still goes through the user.
 - Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` archives, signs
   and exports a pkg into `work/mac-server/`; upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
@@ -124,8 +125,9 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 
 ## Rules
 
-- Nothing on the NAS changes without telling the user; the user runs deploys,
-  deletions there and `git push`. Reading logs, `du`, `df`, mounts is fine.
+- Nothing on the NAS changes without telling the user, except the deploy
+  script above; deletions there go through the user. Commit and push after
+  each change (allowed since 2026-10-21). Reading logs, `du`, `df`, mounts is fine.
   Never read the container's environment or any `.env` file.
 - No automated tests or playback tests unless asked; check syntax with
   `node --check`. A quick one-off script against a temporary `DATA_DIR` in the
