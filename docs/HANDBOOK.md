@@ -72,8 +72,8 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 |---|---|
 | `index.mjs` | HTTP server, routing, `/v1/info` (version string lives here too), timers, shutdown |
 | `auth.mjs` | Device keys (P-256), pairing codes, challenge → session, rate `limit()`, `HttpError` |
-| `requests.mjs` | Connection requests accepted on the dashboard or in the app |
-| `library.mjs` | Scan, metadata (ffprobe), CUE chapters, split folders, views (albums, artists, genres), `favorites()` per profile |
+| `requests.mjs` | Connection requests (in memory) accepted on the dashboard or in the app; `requestListeners` tell `socket.mjs`, which pushes the new list to admin devices; `connectView` adds `connectionRequests` for admins so the apps can notify |
+| `library.mjs` | Scan, metadata (ffprobe), CUE chapters, split folders, views (albums, artists, genres), `favorites()` per profile. `getTrack(id)` returns a file in its library form (`browsingForm`): a split track carries the image's album id, name, artist and cover, so now playing, playlists, Play on and streamers show the right artwork |
 | `library-state.mjs` | Artist aliases (merges) and chosen artwork, kept in memory |
 | `cue.mjs` | CUE parsing (metadata only) |
 | `split.mjs` | Writes CUE chapters as FLAC files in a hidden `.sterio-tracks` folder with a `.sterio-split.json` marker; chapters encoded in parallel (`SPLIT_WORKERS`), two albums in flight |

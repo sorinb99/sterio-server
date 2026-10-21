@@ -4,6 +4,7 @@ import { db, hash } from './db.mjs';
 import { HttpError, limit } from './auth.mjs';
 import { getTrack, trackView } from './library.mjs';
 import { sameProfile } from './profiles.mjs';
+import { pendingRequests } from './requests.mjs';
 
 db.exec(`CREATE TABLE IF NOT EXISTS control_groups (device_id TEXT PRIMARY KEY, group_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS control_invites (hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, expires INTEGER NOT NULL);`);
@@ -58,7 +59,9 @@ export function connectView(device) {
   const pending = (commands.get(device.id) || []).filter(item => item.expires > Date.now() && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.sender) && related(item.sender, device.id));
   commands.set(device.id,pending);
   const devices = [...presence.values()].filter(item => item.id !== device.id && online(item) && related(item.id, device.id) && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.id)).map(item => ({...item,state:{...item.state, tracks:item.state.trackIds.map(id => getTrack(id)).filter(Boolean).map(track => trackView(track,new Set()))}}));
-  return {devices,commands:pending.map(({sender,expires,...command}) => command),linked:linkedDevices(device),...pairingView(device)};
+  // Server administrators also see the connection requests waiting (the app notifies them).
+  const admin = !!db.prepare('SELECT 1 FROM device_admins WHERE device_id=?').get(device.id);
+  return {devices,commands:pending.map(({sender,expires,...command}) => command),linked:linkedDevices(device),...pairingView(device),...(admin ? {connectionRequests:pendingRequests()} : {})};
 }
 // Every other device paired with this one, online or not, so either side can unpair.
 function linkedDevices(device) {

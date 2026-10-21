@@ -201,17 +201,20 @@ function currentSplits() {
   splitVersion=version; return splitFolders;
 }
 function localBrowsing() { return cached('local',buildLocalBrowsing); }
+const chaptersBySource=()=>cached('chaptersBySource',()=>new Map(cueTracks().map(item=>[item.sourceId,item])));
+// A file as the library shows it: an image with its CUE album name, a split
+// track in the image's album (its cover, its artist).
+function browsingForm(item) {
+  const chapters=chaptersBySource(), cue=chapters.get(item.id);
+  if(cue) return applyArtistAlias({...item,album:cue.album,albumArtist:cue.albumArtist,artistId:cue.artistId});
+  const source=currentSplits().get(path.dirname(item.path));
+  if(source) { const album=chapters.get(source.id) || source; return applyArtistAlias({...item,albumId:source.albumId,album:album.album,albumArtist:album.albumArtist,artistId:album.artistId,splitOf:source.id,splitSource:source.path}); }
+  return applyArtistAlias(item);
+}
 function buildLocalBrowsing() {
-  const chapters=new Map(cueTracks().map(item=>[item.sourceId,item])), splits=currentSplits();
+  currentSplits();
   // An unfinished or outdated split folder is hidden, never a duplicate album.
-  return getCatalog().filter(item=>!splitPending.has(path.dirname(item.path))).map(item=> {
-    const cue=chapters.get(item.id);
-    if(cue) return applyArtistAlias({...item,album:cue.album,albumArtist:cue.albumArtist,artistId:cue.artistId});
-    // Split tracks belong to the image's album, shown with its CUE album name.
-    const source=splits.get(path.dirname(item.path));
-    if(source) { const album=chapters.get(source.id) || source; return applyArtistAlias({...item,albumId:source.albumId,album:album.album,albumArtist:album.albumArtist,artistId:album.artistId,splitOf:source.id,splitSource:source.path}); }
-    return applyArtistAlias(item);
-  });
+  return getCatalog().filter(item=>!splitPending.has(path.dirname(item.path))).map(browsingForm);
 }
 // Linked servers (peers.mjs keeps peer_tracks in sync with their shared index).
 // Each remote track gets its own ID here. A song this library (or a server
@@ -364,7 +367,8 @@ function movedTrackIds() {
 }
 export function getTrack(id) {
   let row=db.prepare('SELECT * FROM tracks WHERE id=?').get(id) || (movedTrackIds().has(id) && db.prepare('SELECT * FROM tracks WHERE id=?').get(movedTrackIds().get(id)));
-  if(row) return applyArtistAlias({...decodeMetadata(row.metadata),size:row.size,mtime:row.mtime});
+  // The same album, cover and artist as in the library (now playing, playlists, streamers).
+  if(row) return browsingForm({...decodeMetadata(row.metadata),size:row.size,mtime:row.mtime});
   const cue=db.prepare('SELECT * FROM cue_tracks WHERE id=?').get(id);
   if(!cue) return remoteCatalog().byId.get(id) || null;
   row=db.prepare('SELECT * FROM tracks WHERE id=?').get(cue.source_id);

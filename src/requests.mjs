@@ -8,6 +8,9 @@ import { macMode } from './mac.mjs';
 // Requests live in memory: the requester asks again every few seconds while
 // it waits, so a restart loses nothing.
 const requests = new Map();
+// Told when the waiting list changes, so admin devices hear of it at once.
+export const requestListeners = new Set();
+const changed = () => { for (const listener of requestListeners) try { listener(); } catch {} };
 const text = (value, max = 80) => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, max) : '';
 const codeOf = id => String(parseInt(id.slice(0, 8), 16) % 10000).padStart(4, '0');
 function prune() {
@@ -36,6 +39,7 @@ export function requestAccess(kind, body, address) {
     console.log(`Connection request from ${kind === 'server' ? 'server' : 'device'} "${entry.name}" (code ${entry.code})`);
     // The Mac app brings the dashboard up, so the request is seen.
     if (macMode) process.stdout.write('\n@@sterio open-dashboard\n');
+    changed();
   }
   entry.seen = Date.now();
   return { status: 'pending', code: entry.code };
@@ -52,6 +56,7 @@ export function decideRequest(input) {
   if (!input.accept) {
     Object.assign(entry, { status: 'declined', decided: Date.now() });
     console.log(`Connection request declined: "${entry.name}"`);
+    changed();
     return { ok: true };
   }
   db.exec('BEGIN IMMEDIATE');
@@ -66,5 +71,6 @@ export function decideRequest(input) {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
   requests.delete(entry.id);
   console.log(`Connection request accepted: ${entry.kind} "${entry.name}"`);
+  changed();
   return { ok: true };
 }

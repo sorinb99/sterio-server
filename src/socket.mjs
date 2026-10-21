@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { db, hash } from './db.mjs';
 import { limit } from './auth.mjs';
 import { connectView, pulse, related, sendCommand } from './connect.mjs';
+import { requestListeners } from './requests.mjs';
 import { updateDeviceNickname } from './reporting.mjs';
 import { load } from './load.mjs';
 
@@ -47,6 +48,13 @@ function notifyGroup(device, skipSelf = true) {
     try { send(client, { type: 'pulse', ...connectView(client.device) }); } catch {}
   }
 }
+// A new or decided connection request reaches the administrators' apps at once.
+requestListeners.add(() => {
+  for (const client of sockets) {
+    if (!client.device || !db.prepare('SELECT 1 FROM device_admins WHERE device_id=?').get(client.device.id)) continue;
+    try { send(client, { type: 'pulse', ...connectView(client.device) }); } catch {}
+  }
+});
 function handle(client, message) {
   if (message.type === 'auth') {
     const device = signedIn(message.token);
