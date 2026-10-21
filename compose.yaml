@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: sterio-server:0.1.53
+    image: sterio-server:0.1.57
     build: .
     container_name: sterio
     restart: unless-stopped
@@ -21,7 +21,8 @@ services:
       BASE_PATH: "${BASE_PATH:-}"
       SCAN_INTERVAL_SECONDS: "${SCAN_INTERVAL_SECONDS:-900}"
       MAX_PCM_RATE: "${MAX_PCM_RATE:-192000}"
-      CACHE_MAX_MB: "${CACHE_MAX_MB:-4096}"
+      CACHE_MAX_MB: "${CACHE_MAX_MB:-20480}"
+      CACHE_MAX_DAYS: "${CACHE_MAX_DAYS:-30}"
       TRANSCODE_WORKERS: "${TRANSCODE_WORKERS:-}"
     volumes:
       - "${MUSIC_PATH:?Set MUSIC_PATH in .env}:/music:${MUSIC_ACCESS:-ro}"

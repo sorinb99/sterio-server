@@ -21,6 +21,8 @@ export const config = {
   scanSeconds: integer('SCAN_INTERVAL_SECONDS', 900, 30, 86400),
   maxPcmRate: integer('MAX_PCM_RATE', 192000, 44100, 384000),
   cacheBytes: integer('CACHE_MAX_MB', 4096, 128, 1048576) * 1024 * 1024,
+  // Conversions unused this many days are deleted even below the size limit.
+  cacheDays: integer('CACHE_MAX_DAYS', 30, 1, 3650),
   // Conversions in parallel: one core stays free for the API and streaming.
   workers: integer('TRANSCODE_WORKERS', Math.max(1, Math.min(4, os.availableParallelism() - 1)), 1, 16),
   tlsCert: process.env.TLS_CERT_FILE,

@@ -80,6 +80,6 @@ export function verifyTicket(ticket, trackId) {
   if (extra || actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new HttpError(401, 'Invalid stream ticket');
   let value;
   try { value = JSON.parse(Buffer.from(payload, 'base64url')); } catch { throw new HttpError(401, 'Invalid stream ticket'); }
-  if (value.t !== trackId || !Number.isFinite(value.e) || value.e < Date.now() || !['original','pcm','lossless','cue'].includes(value.m) || !db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(value.d)) throw new HttpError(401, 'Stream ticket expired or device revoked');
+  if (value.t !== trackId || !Number.isFinite(value.e) || value.e < Date.now() || !['original','pcm','verbatim','lossless','cue','cueverbatim'].includes(value.m) || !db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(value.d)) throw new HttpError(401, 'Stream ticket expired or device revoked');
   return value;
 }

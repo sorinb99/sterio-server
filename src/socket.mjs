@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { db, hash } from './db.mjs';
 import { limit } from './auth.mjs';
-import { connectView, controlGroup, pulse, sendCommand } from './connect.mjs';
+import { connectView, pulse, related, sendCommand } from './connect.mjs';
 import { updateDeviceNickname } from './reporting.mjs';
 import { load } from './load.mjs';
 
@@ -42,9 +42,8 @@ function stillLinked(device) {
 }
 // Everyone else in the device's control group gets what they see now.
 function notifyGroup(device, skipSelf = true) {
-  const group = controlGroup(device.id);
   for (const client of sockets) {
-    if (!client.device || (skipSelf && client.device.id === device.id) || controlGroup(client.device.id) !== group) continue;
+    if (!client.device || (skipSelf && client.device.id === device.id) || !related(client.device.id, device.id)) continue;
     try { send(client, { type: 'pulse', ...connectView(client.device) }); } catch {}
   }
 }
@@ -63,8 +62,8 @@ function handle(client, message) {
     const input = message.pulse || {};
     updateDeviceNickname(client.device, input);
     send(client, { type: 'pulse', ...pulse(client.device, input) });
-    // A Mac's new state goes straight to the phones controlling it.
-    if (input.platform === 'macos') notifyGroup(client.device);
+    // A device's new state goes straight to the devices controlling it.
+    notifyGroup(client.device);
     return;
   }
   if (message.type === 'command') {

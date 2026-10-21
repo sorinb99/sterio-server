@@ -9,12 +9,16 @@ import { cacheDir, musicPath, getTrack } from './library.mjs';
 import { hash } from './db.mjs';
 import { HttpError } from './auth.mjs';
 import { load } from './load.mjs';
+import { verbatimLayout, verbatimFrame, verbatimBlock, verbatimBits } from './verbatim.mjs';
 const conversionErrors = new Map();
 // Linked DSD → PCM conversions a streamer may play while they run: the
 // original comes over the internet, so waiting for the whole file can take
 // minutes. Keyed by the finished file's name.
 const live = new Map();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Verbatim FLAC conversions apps play and seek while they run (verbatim.mjs).
+// Keyed by the finished file's name.
+const growing = new Map();
 const pending = new Map(), activeFiles = new Set();
 let active = 0; const waiting = [];
 async function slot() {
@@ -57,8 +61,10 @@ export function shortFlacFrames(header) {
   const maxBlock = header.readUInt16BE(10);
   return maxBlock > 0 && maxBlock < 192;
 }
+// A CUE chapter streamed while it is cut from the album image (verbatim FLAC).
+export const canStreamCue = track => canDeliverCueFlac(track) && !!verbatimBits(track.format.bitDepth || 16);
 export const canDeliverCueFlac = track => !!track.segment && !!track.sourceId && !track.dsd && String(track.format.codec).toLowerCase() === 'flac' && String(track.format.container).toLowerCase() === 'flac';
-const cacheName = (track, mode = 'pcm') => path.join(cacheDir, `${track.id}-${hash(`${track.mtime}:${track.size}:${mode === 'cue' ? `cue-flac-v1:${track.segment.startSeconds}:${track.segment.endSeconds}` : mode === 'lossless' ? 'flac-4096-indexed-v2' : `${config.maxPcmRate}:pcm-v4-flac4096-indexed`}`).slice(0,16)}.flac`);
+const cacheName = (track, mode = 'pcm') => path.join(cacheDir, `${track.id}-${hash(`${track.mtime}:${track.size}:${mode === 'cue' ? `cue-flac-v1:${track.segment.startSeconds}:${track.segment.endSeconds}` : mode === 'cueverbatim' ? `cue-verbatim-v1:${track.segment.startSeconds}:${track.segment.endSeconds}` : mode === 'lossless' ? 'flac-4096-indexed-v2' : mode === 'verbatim' ? `${config.maxPcmRate}:flac-verbatim-v2` : `${config.maxPcmRate}:pcm-v4-flac4096-indexed`}`).slice(0,16)}.flac`);
 // Existing complete PCM conversions can be reframed without re-running DSD
 // conversion or resampling. The versioned destination keeps active URLs stable.
 const legacyPcmCacheName = track => path.join(cacheDir, `${track.id}-${hash(`${track.mtime}:${track.size}:${config.maxPcmRate}:pcm-v2`).slice(0,16)}.flac`);
@@ -72,8 +78,10 @@ export async function pruneCache(protectedFile) {
   }
   let bytes = files.reduce((sum,file) => sum + file.size, 0);
   files.sort((a,b) => a.time - b.time);
+  // Oldest first: over the size limit, or not played for CACHE_MAX_DAYS.
+  const stale = Date.now() - config.cacheDays * 86400000;
   for (const file of files) {
-    if (bytes <= config.cacheBytes) break;
+    if (bytes <= config.cacheBytes && file.time >= stale) break;
     if (file.file === protectedFile || activeFiles.has(file.file)) continue;
     await unlink(file.file).catch(() => {}); bytes -= file.size;
   }
@@ -94,6 +102,7 @@ function resampler() {
   }).then(text => text.includes('libsoxr') ? 'aresample=resampler=soxr:precision=28' : 'aresample=resampler=swr:filter_size=128:phase_shift=20:cutoff=0.97');
   return resamplerFilter;
 }
+const inputOptions = (source, sourceUrl) => sourceUrl ? ['-protocol_whitelist','file,http,https,tcp,tls,crypto','-reconnect','1','-reconnect_on_network_error','1','-reconnect_delay_max','10','-rw_timeout','30000000',...(source.startsWith('https:') && caFile ? ['-ca_file',caFile] : [])] : ['-protocol_whitelist','file'];
 // sourceUrl: a linked server's original, read over HTTP by FFmpeg.
 async function convert(track, destination, mode = 'pcm', sourceUrl) {
   const queued = Date.now(), name = track.path ? path.basename(track.path) : track.title;
@@ -126,7 +135,7 @@ async function convert(track, destination, mode = 'pcm', sourceUrl) {
         ? ['-c:a','flac','-compression_level','5','-frame_size','4096']
         : ['-af',filter,'-ar',String(format.sampleRate),'-ac',String(format.channels),'-sample_fmt','s32','-c:a','flac','-compression_level','5','-frame_size','4096'];
       // A remote original survives short network drops; seeking uses byte ranges.
-      const input = sourceUrl ? ['-protocol_whitelist','file,http,https,tcp,tls,crypto','-reconnect','1','-reconnect_on_network_error','1','-reconnect_delay_max','10','-rw_timeout','30000000',...(source.startsWith('https:') && caFile ? ['-ca_file',caFile] : [])] : ['-protocol_whitelist','file'];
+      const input = inputOptions(source, sourceUrl);
       const state = sourceUrl && mode === 'pcm' ? { temp, started: Date.now(), seconds: 0, done: false, failed: false } : null;
       const child = spawn('ffmpeg', ['-v','error','-nostdin','-y',...(state ? ['-progress','pipe:1'] : []),...input,...inputSeek,'-i',source,'-map','0:a:0','-map_metadata','-1','-vn','-sn','-dn',...audioOptions,'-f','flac',temp], { stdio: ['ignore',state ? 'pipe' : 'ignore','pipe'] });
       if (state) {
@@ -181,12 +190,180 @@ async function convert(track, destination, mode = 'pcm', sourceUrl) {
     await unlink(temp).catch(() => {}); release();
   }
 }
+// The PCM length must be known before converting: a local DSF states its
+// exact sample count; other sources use the probed duration. FFmpeg's output
+// is padded or trimmed to exactly this length.
+async function verbatimSamples(track, rate, file) {
+  if (file && /\.dsf$/i.test(file)) {
+    const handle = await open(file, 'r');
+    try {
+      const head = Buffer.alloc(72);
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      if (bytesRead === head.length && head.toString('ascii',0,4) === 'DSD ' && head.toString('ascii',28,32) === 'fmt ') {
+        const dsdRate = head.readUInt32LE(56), count = Number(head.readBigUInt64LE(64));
+        if (dsdRate > 0 && count > 0) return Math.round(count * rate / dsdRate);
+      }
+    } finally { await handle.close(); }
+  }
+  return Math.round((track.durationMs || 0) / 1000 * rate);
+}
+const notify = state => { for (const wake of state.waiters) wake(); state.waiters.clear(); };
+const changed = (state, ms) => new Promise(resolve => { const timer = setTimeout(resolve, ms); state.waiters.add(() => { clearTimeout(timer); resolve(); }); });
+// DSD → PCM ('verbatim') or a CUE chapter cut from its image ('cueverbatim'),
+// written as verbatim FLAC frames in their final place, so the file can be
+// streamed and seeked from its first second.
+async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim') {
+  const queued = Date.now(), name = track.path ? path.basename(track.path) : track.title;
+  await slot();
+  const started = Date.now();
+  console.log(`Conversion start: ${mode} "${name}" waited ${started - queued} ms (active ${active}, queued ${waiting.length})`);
+  const temp = destination + '.' + randomBytes(8).toString('hex') + '.part';
+  const state = { temp, layout: null, written: 0, seconds: 0, done: false, failed: false, waiters: new Set() };
+  let handle;
+  try {
+    const source = sourceUrl ? await sourceUrl() : await musicPath(track.path);
+    let rate, channels, bits, samples, seek = [], length = [], filter;
+    if (mode === 'cueverbatim') {
+      // The same sample boundaries as the compressed chapter (see convert).
+      rate = track.format.sampleRate; channels = track.format.channels || 2; bits = verbatimBits(track.format.bitDepth || 16);
+      const startSample = Math.round(track.segment.startSeconds * rate);
+      samples = Math.round(track.segment.endSeconds * rate) - startSample;
+      seek = ['-ss', (startSample / rate).toFixed(9)]; length = ['-t', (samples / rate).toFixed(9)];
+      filter = `atrim=end_sample=${samples},apad=whole_len=${samples}`;
+    } else {
+      const format = deliveredFormat(track);
+      rate = format.sampleRate; channels = format.channels; bits = 24;
+      samples = await verbatimSamples(track, rate, sourceUrl ? null : source);
+      filter = `${await resampler()}:osr=${rate},aformat=sample_fmts=s32:channel_layouts=${channels === 1 ? 'mono' : 'stereo'},apad=whole_len=${samples},atrim=end_sample=${samples}`;
+    }
+    if (!(samples > 0) || !bits) throw new HttpError(422, 'The track length is unknown, so it cannot be converted while playing.');
+    const layout = verbatimLayout({ sampleRate: rate, channels, samples, bits });
+    if (layout.size > config.cacheBytes) throw new HttpError(413, 'Converted track exceeds CACHE_MAX_MB. Increase the cache limit.');
+    const available = await statfs(cacheDir);
+    if (available.bavail * available.bsize < layout.size + 256 * 1024 * 1024) throw new HttpError(507, 'Not enough free space in the server data volume');
+    handle = await open(temp, 'w');
+    await handle.write(layout.header, 0, layout.header.length, 0);
+    state.layout = layout; state.written = layout.header.length;
+    growing.set(destination, state);
+    const raw = bits === 16 ? 's16le' : 's24le';
+    const child = spawn('ffmpeg', ['-v','error','-nostdin',...inputOptions(source, sourceUrl),...seek,'-i',source,...length,'-map','0:a:0','-vn','-sn','-dn','-af',filter,'-c:a',`pcm_${raw}`,'-f',raw,'pipe:1'], { stdio: ['ignore','pipe','pipe'] });
+    let errorText = '';
+    child.stderr.on('data', chunk => { errorText = (errorText + chunk.toString()).replace(/ticket=[^\s&"']+/g,'ticket=…').slice(-1000); });
+    const exit = new Promise(resolve => { child.on('close', resolve); child.on('error', () => resolve(-1)); });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), (sourceUrl ? 60 : 15) * 60 * 1000);
+    let index = 0, rest = Buffer.alloc(0);
+    const frameInput = index => layout.frameSamples(index) * channels * layout.bytes;
+    const write = async data => {
+      const frame = verbatimFrame(layout, index, data);
+      await handle.write(frame, 0, frame.length, layout.offsets[index]);
+      index++; state.written = layout.offsets[index];
+      state.seconds = Math.min(samples, index * verbatimBlock) / rate;
+      notify(state);
+    };
+    try {
+      for await (const chunk of child.stdout) {
+        rest = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+        let at = 0;
+        for (let size; index < layout.frames && rest.length - at >= (size = frameInput(index)); at += size) await write(rest.subarray(at, at + size));
+        rest = rest.subarray(at);
+      }
+    } finally { clearTimeout(timeout); }
+    const code = await exit;
+    if (code !== 0) {
+      console.warn(`Audio conversion failed after ${Date.now() - started} ms: ${mode} "${name}"`, errorText);
+      throw new HttpError(422, 'Audio conversion failed. Check the server log and file codec.');
+    }
+    // The length is fixed in the header: silence covers any shortfall.
+    while (index < layout.frames) await write(Buffer.alloc(frameInput(index)));
+    await handle.close(); handle = null;
+    await rename(temp, destination);
+    state.done = true; notify(state);
+    console.log(`Conversion done: ${mode} "${name}" ${Date.now() - started} ms, ${(layout.size / 1048576).toFixed(1)} MB`);
+    await pruneCache(destination);
+    return destination;
+  } finally {
+    if (!state.done) { state.failed = true; notify(state); }
+    if (growing.get(destination) === state) growing.delete(destination);
+    await handle?.close().catch(() => {});
+    await unlink(temp).catch(() => {}); release();
+  }
+}
+// Ready once a couple of seconds exist: conversion runs far ahead of playback,
+// and the stream waits for any byte not yet written.
+async function prepareGrowing(destination, start, waitMs) {
+  if (await prepareJob(destination, start, 0)) return true;
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const state = growing.get(destination), work = pending.get(destination);
+    if (state && !state.failed && (state.done || state.seconds >= 2)) return true;
+    if (!work) {
+      try { await stat(destination); return true; } catch {}
+      const failed = conversionErrors.get(destination);
+      if (failed) throw failed.error;
+      return false;
+    }
+    if (Date.now() >= until) return false;
+    await Promise.race([work.then(() => {}, () => {}), sleep(100)]);
+  }
+}
+async function streamVerbatim(req, res, destination, start) {
+  try { await stat(destination); await utimes(destination,new Date(),new Date()); return sendFile(req, res, destination, 'audio/flac'); } catch {}
+  await prepareJob(destination, start, 0);
+  for (;;) {
+    const state = growing.get(destination), work = pending.get(destination);
+    if (state && !state.failed) return streamGrowing(req, res, state, destination);
+    if (!work) break;
+    await Promise.race([work.then(() => {}, () => {}), sleep(50)]);
+  }
+  const failed = conversionErrors.get(destination);
+  if (failed) throw failed.error;
+  return sendFile(req, res, destination, 'audio/flac');
+}
+// Byte ranges of a file whose final size is known; bytes not converted yet
+// are sent as soon as they are written.
+async function streamGrowing(req, res, state, destination) {
+  const size = state.layout.size;
+  let start = 0, end = size - 1, status = 200;
+  if (req.headers.range) {
+    const match = req.headers.range.match(/^bytes=(\d*)-(\d*)$/);
+    if (match && (match[1] || match[2])) {
+      if (match[1]) { start = Number(match[1]); if (match[2]) end = Number(match[2]); }
+      else start = Math.max(0, size - Number(match[2]));
+    }
+    if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= size || end < start) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+    end = Math.min(end, size - 1); status = 206;
+  }
+  res.writeHead(status, { 'Content-Type': 'audio/flac', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-store', 'Content-Length': end - start + 1, ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
+  if (req.method === 'HEAD') { res.end(); return; }
+  // Renamed to the finished file name once complete; either holds the same bytes.
+  const handle = await open(state.temp, 'r').catch(() => open(destination, 'r'));
+  load.stream(1);
+  let closed = false, position = start;
+  res.once('close', () => { closed = true; notify(state); });
+  try {
+    const buffer = Buffer.alloc(256 * 1024);
+    while (!closed && position <= end) {
+      const available = Math.min(end + 1, state.done ? size : state.written);
+      if (position < available) {
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, available - position), position);
+        if (!bytesRead) { res.destroy(); return; }
+        position += bytesRead;
+        if (!res.write(Buffer.from(buffer.subarray(0, bytesRead)))) await new Promise(resolve => { res.once('drain', resolve); res.once('close', resolve); });
+        continue;
+      }
+      if (state.failed) { res.destroy(); return; }
+      await changed(state, 1000);
+    }
+    res.end();
+  } finally { load.stream(-1); await handle.close().catch(() => {}); }
+}
 function conversionSource(track) { return track.sourceId ? getTrack(track.sourceId) : track; }
 // waitMs lets /prepare answer as soon as a short job finishes, instead of the
 // client discovering it on its next one-second poll.
 export async function prepareConversion(track, mode = 'pcm', waitMs = 0) {
-  if (mode === 'cue' && !canDeliverCueFlac(track)) throw new HttpError(422, 'This track is not a FLAC CUE chapter');
-  if (mode !== 'cue') track=conversionSource(track);
+  if ((mode === 'cue' || mode === 'cueverbatim') && !canDeliverCueFlac(track)) throw new HttpError(422, 'This track is not a FLAC CUE chapter');
+  if (mode !== 'cue' && mode !== 'cueverbatim') track=conversionSource(track);
+  if (mode === 'verbatim' || mode === 'cueverbatim') return prepareGrowing(cacheName(track, mode), () => convertVerbatim(track, cacheName(track, mode), undefined, mode), waitMs);
   return prepareJob(cacheName(track, mode), () => convert(track,cacheName(track, mode),mode), waitMs);
 }
 async function prepareJob(destination, start, waitMs) {
@@ -214,7 +391,7 @@ export async function playablePath(track, mode) {
 }
 // Tracks of a linked server: the server that serves the listener converts,
 // reading the other server's original. media is the local stream ID.
-const linkedCacheName = (media, track, mode) => path.join(cacheDir, `${media}-${hash(`linked:${track.format.sampleRate}:${track.format.codec}:${mode === 'cue' ? `cue-flac-v1:${track.durationMs}:${track.segment.startSeconds}:${track.segment.endSeconds}` : mode === 'lossless' ? 'flac-4096-indexed-v2' : `${config.maxPcmRate}:pcm-v4-flac4096-indexed`}`).slice(0,16)}.flac`);
+const linkedCacheName = (media, track, mode) => path.join(cacheDir, `${media}-${hash(`linked:${track.format.sampleRate}:${track.format.codec}:${mode === 'cue' ? `cue-flac-v1:${track.durationMs}:${track.segment.startSeconds}:${track.segment.endSeconds}` : mode === 'cueverbatim' ? `cue-verbatim-v1:${track.durationMs}:${track.segment.startSeconds}:${track.segment.endSeconds}` : mode === 'lossless' ? 'flac-4096-indexed-v2' : mode === 'verbatim' ? `${config.maxPcmRate}:flac-verbatim-v2` : `${config.maxPcmRate}:pcm-v4-flac4096-indexed`}`).slice(0,16)}.flac`);
 // A live conversion is far enough ahead once it has a buffer and runs
 // clearly faster than playback; otherwise the streamer would stall.
 function liveReady(destination) {
@@ -227,11 +404,13 @@ function liveReady(destination) {
 // liveOk: streamers only. Apps wait for the finished file, which they can seek.
 export async function prepareLinkedConversion(media, track, mode, sourceUrl, waitMs = 0, liveOk = false) {
   const destination = linkedCacheName(media, track, mode);
+  if (mode === 'verbatim' || mode === 'cueverbatim') return prepareGrowing(destination, () => convertVerbatim(track, destination, sourceUrl, mode), waitMs);
   const ready = await prepareJob(destination, () => convert(track, destination, mode, sourceUrl), liveOk ? Math.min(waitMs, 2000) : waitMs);
   return ready || (liveOk && liveReady(destination));
 }
 export async function streamLinkedConversion(req, res, media, track, mode, sourceUrl) {
   const destination = linkedCacheName(media, track, mode);
+  if (mode === 'verbatim' || mode === 'cueverbatim') return streamVerbatim(req, res, destination, () => convertVerbatim(track, destination, sourceUrl, mode));
   try { await stat(destination); await utimes(destination,new Date(),new Date()); }
   catch {
     if (!pending.has(destination)) pending.set(destination, convert(track, destination, mode, sourceUrl).finally(() => pending.delete(destination)));
@@ -302,6 +481,11 @@ export async function sendFile(req, res, filename, type) {
 export async function streamTrack(req,res,id,mode) {
   const track = getTrack(id);
   if (!track) throw new HttpError(404, 'Track not found');
+  if (mode === 'verbatim' || mode === 'cueverbatim') {
+    if (mode === 'cueverbatim' && !canDeliverCueFlac(track)) throw new HttpError(422, 'This track is not a FLAC CUE chapter');
+    const source = mode === 'verbatim' ? conversionSource(track) : track, destination = cacheName(source, mode);
+    return streamVerbatim(req, res, destination, () => convertVerbatim(source, destination, undefined, mode));
+  }
   const file = await playablePath(track, mode);
   return sendFile(req,res,file,mode !== 'original' ? 'audio/flac' : undefined);
 }

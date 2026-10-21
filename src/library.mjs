@@ -1,4 +1,5 @@
 import { readdir, stat, realpath, mkdir, unlink, readFile } from 'node:fs/promises';
+import { marks, profileDevices } from './profiles.mjs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { config } from './config.mjs';
@@ -372,7 +373,8 @@ export function getTrack(id) {
 }
 // Every track as the apps see it, without per-device favorites (page() adds them).
 export function trackViews() { return cached('trackViews',()=>ordered(albumTracks(null).map(item=>trackView(item,new Set())))); }
-export function favorites(deviceId) { movedTrackIds(); return new Set(db.prepare('SELECT item_id FROM favorites WHERE device_id=?').all(deviceId).map(row => row.item_id)); }
+// Favorites of every device in the listener's profile.
+export function favorites(deviceId) { movedTrackIds(); const devices = profileDevices(deviceId); return new Set(db.prepare(`SELECT item_id FROM favorites WHERE device_id IN (${marks(devices)})`).all(...devices).map(row => row.item_id)); }
 export function trackView(item, favoriteIds) {
   const { path: _, id, albumArtist, artistId, genres, genreIds, dsd, sourceId, cuePath, cueTitle, splitOf, splitSource, remote, ...visible } = item;
   delete visible.size; delete visible.mtime;

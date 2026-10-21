@@ -10,6 +10,10 @@ import { prepareDelivery, resolveDelivery } from './delivery.mjs';
 // this server. The server keeps the queue and advances it, so the app is only
 // a remote: it can sleep or close while the streamer keeps playing.
 db.exec(`CREATE TABLE IF NOT EXISTS renderers (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', location TEXT NOT NULL, control TEXT NOT NULL DEFAULT '{}', stream_base TEXT NOT NULL, created INTEGER NOT NULL)`);
+// Each streamer belongs to the app device that added it: listeners on other
+// networks never see (or control) it. '' marks streamers added in the admin,
+// which only the admin lists.
+try { db.exec("ALTER TABLE renderers ADD COLUMN owner TEXT NOT NULL DEFAULT ''"); } catch {}
 const sessions = new Map();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const unescape = value => value.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(m,n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi,(m,n) => String.fromCodePoint(parseInt(n,16))).replace(/&amp;/g,'&');
@@ -147,6 +151,12 @@ const upnp = {
 const drivers = { bluos, upnp };
 const parse = row => row && { ...row, control:JSON.parse(row.control) };
 const rendererRow = id => parse(db.prepare('SELECT * FROM renderers WHERE id=?').get(id));
+// owner: the app device asking, or undefined for the admin.
+function ownedRow(id, owner) {
+  const renderer = rendererRow(id);
+  if (!renderer || (owner !== undefined && renderer.owner !== owner)) throw new HttpError(404,'Streamer not found');
+  return renderer;
+}
 // Each streamer is a device of its own: stream tickets, rate limits and the
 // admin's live playback treat it like any other listener.
 const deviceId = id => hash('renderer\0' + id);
@@ -190,25 +200,35 @@ function view(renderer, withQueue = false) {
       ...(withQueue ? { tracks:session.queue.map(id => getTrack(id)).filter(Boolean).map(item => trackView(item,new Set())) } : {}) } : null };
 }
 // queue: a streamer whose full queue the app needs (it changes only on play).
-export function listRenderers(queue) { return { items:db.prepare('SELECT * FROM renderers ORDER BY name').all().map(row => view(parse(row), row.id === queue)) }; }
+// owner: the app device; undefined (the admin) lists every streamer.
+export function listRenderers(queue, owner) {
+  const rows = owner === undefined ? db.prepare('SELECT * FROM renderers ORDER BY name').all() : db.prepare('SELECT * FROM renderers WHERE owner=? ORDER BY name').all(owner);
+  return { items:rows.map(row => view(parse(row), row.id === queue)) };
+}
 // base: where the streamer fetches audio. Unknown yet (admin on localhost): the
 // first playback from the app on the LAN sets it.
-export async function addRenderer(input, base) {
+export async function addRenderer(input, base, owner = '') {
   const address = String(input.address || '').trim();
   const host = address.replace(/^http:\/\//,'').replace(/[:/].*$/,'');
   if (!privateHost(host)) throw new HttpError(400,'Enter the streamer\'s local IP address, for example 192.168.1.50');
   const found = (!/^http:\/\//.test(address) && await bluos.probe(host)) || await upnp.probe(/^http:\/\//.test(address) ? address : host);
   if (!found) throw new HttpError(404,'No BluOS or UPnP streamer answered at this address');
-  const existing = db.prepare('SELECT id FROM renderers WHERE location=?').get(found.location);
+  // The same streamer at a new address (a UPnP renderer takes a new port when
+  // it restarts) updates the entry instead of adding a second one.
+  const foundHost = new URL(found.location).hostname;
+  const existing = db.prepare('SELECT id FROM renderers WHERE location=? AND owner=?').get(found.location, owner)
+    || db.prepare('SELECT id, location, name, kind FROM renderers WHERE owner=?').all(owner).find(row => row.kind === found.kind && row.name.trim().toLowerCase() === found.name.slice(0,80).trim().toLowerCase() && new URL(row.location).hostname === foundHost);
   const id = existing?.id || randomUUID();
-  db.prepare(`INSERT INTO renderers VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,model=excluded.model,control=excluded.control,stream_base=CASE WHEN excluded.stream_base<>'' THEN excluded.stream_base ELSE renderers.stream_base END`)
-    .run(id, found.kind, found.name.slice(0,80), found.model.slice(0,120), found.location, JSON.stringify(found.control), base || '', Date.now());
+  db.prepare(`INSERT INTO renderers (id,kind,name,model,location,control,stream_base,created,owner) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,model=excluded.model,location=excluded.location,control=excluded.control,stream_base=CASE WHEN excluded.stream_base<>'' THEN excluded.stream_base ELSE renderers.stream_base END`)
+    .run(id, found.kind, found.name.slice(0,80), found.model.slice(0,120), found.location, JSON.stringify(found.control), base || '', Date.now(), owner);
+  // A session keeps playing on the updated address.
+  const session = sessions.get(id); if (session) session.renderer = rendererRow(id);
   const label = `${found.name.slice(0,60)} (streamer)`;
   db.prepare("INSERT INTO devices (id,name,public_key,created) VALUES (?,?,'',?) ON CONFLICT(id) DO UPDATE SET name=excluded.name").run(deviceId(id), label, Date.now());
   return view(rendererRow(id));
 }
-export async function removeRenderer(id) {
-  const renderer = rendererRow(id); if (!renderer) throw new HttpError(404,'Streamer not found');
+export async function removeRenderer(id, owner) {
+  const renderer = ownedRow(id, owner);
   const session = sessions.get(id);
   if (session) { session.epoch++; report(session,'stop'); sessions.delete(id); await drivers[renderer.kind].stop(renderer).catch(() => {}); }
   db.prepare('DELETE FROM renderers WHERE id=?').run(id);
@@ -218,7 +238,7 @@ export async function removeRenderer(id) {
 // Searches the server's /24 (from the address the app or admin used): BluOS on
 // port 11000 and a unicast SSDP search on port 1900 to every address, which
 // also works from a Docker bridge network, plus the usual multicast search.
-export async function discoverRenderers(subnet) {
+export async function discoverRenderers(subnet, owner) {
   const found = new Map(), players = [];
   // An app on the public address: use the LAN address streamers already use.
   const lan = [subnet, config.rendererBase, lanHint, ...db.prepare("SELECT stream_base FROM renderers WHERE stream_base<>''").all().map(row => row.stream_base)]
@@ -247,7 +267,7 @@ export async function discoverRenderers(subnet) {
     setTimeout(finish, 3500);
   });
   await Promise.all([bluosScan, ssdp]);
-  const known = new Set(db.prepare('SELECT location FROM renderers').all().map(row => row.location));
+  const known = new Set((owner === undefined ? db.prepare('SELECT location FROM renderers').all() : db.prepare('SELECT location FROM renderers WHERE owner=?').all(owner)).map(row => row.location));
   const upnpFound = [];
   for (const [location, address] of found) {
     if (known.has(location)) continue;
@@ -403,7 +423,7 @@ function queueIds(value) {
 }
 export async function playOnRenderer(device, id, input, base) {
   limit('renderer:' + device.id, 120);
-  if (!rendererRow(id)) throw new HttpError(404,'Streamer not found');
+  ownedRow(id, device.id);
   // Follow the server address the app currently uses on the LAN.
   if (base) db.prepare('UPDATE renderers SET stream_base=? WHERE id=?').run(base, id);
   const renderer = rendererRow(id);
@@ -417,9 +437,10 @@ export async function playOnRenderer(device, id, input, base) {
   await start(session, offset);
   return view(renderer);
 }
-export async function controlRenderer(device, id, input) {
+// admin: the admin's commands reach every streamer.
+export async function controlRenderer(device, id, input, admin = false) {
   limit('renderer:' + device.id, 240);
-  const renderer = rendererRow(id); if (!renderer) throw new HttpError(404,'Streamer not found');
+  const renderer = ownedRow(id, admin ? undefined : device.id);
   const session = sessions.get(id), driver = drivers[renderer.kind];
   if (input.action === 'volume') {
     if (!Number.isFinite(input.volume) || input.volume < 0 || input.volume > 100) throw new HttpError(400,'Volume must be between 0 and 100');
@@ -435,7 +456,7 @@ export async function controlRenderer(device, id, input) {
       if (['ended','stopped','error'].includes(session.status)) { if (session.status === 'ended') session.index = 0; await start(session, session.status === 'stopped' ? session.position : 0); }
       else { await driver.resume(renderer); session.status = 'playing'; }
       break;
-    case 'toggle': return await controlRenderer(device, id, { action:session.status === 'playing' || session.status === 'buffering' ? 'pause' : 'resume' });
+    case 'toggle': return await controlRenderer(device, id, { action:session.status === 'playing' || session.status === 'buffering' ? 'pause' : 'resume' }, admin);
     case 'next': if (session.index + 1 < session.queue.length) await advance(session, 1); break;
     case 'previous':
       if (session.position > 3 || session.index === 0) { await driver.seek(renderer, offset); session.position = 0; }

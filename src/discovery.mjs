@@ -2,16 +2,19 @@ import { db, hash } from './db.mjs';
 import { albumViews, favorites, groupViews, libraryRevision, mixTracks, scanStatus, trackView } from './library.mjs';
 import { Worker } from 'node:worker_threads';
 import { HttpError } from './auth.mjs';
+import { marks, profileDevices, profileOf } from './profiles.mjs';
 
 // Metadata only: never probe, resolve, convert or open audio while building Home.
 const cache = new Map();
 const flights = new Map();
 let running = 0;
 const DAY = 86400000;
-export function invalidateDiscovery(deviceId) { for (const key of cache.keys()) if (key.startsWith(deviceId + ':')) cache.delete(key); }
+// Home is built from the whole profile's listening: one cache per profile.
+export function invalidateDiscovery(deviceId) { const profile = profileOf(deviceId); for (const key of cache.keys()) if (key.startsWith(profile + ':') || key.startsWith(deviceId + ':')) cache.delete(key); }
 export async function discoverySeed(device, genreIds = []) {
-  const key = device.id + ':' + [...genreIds].sort().join(',');
-  const preference = db.prepare('SELECT count(*) AS count,max(liked_at) AS latest FROM radio_likes WHERE device_id=?').get(device.id);
+  const key = profileOf(device.id) + ':' + [...genreIds].sort().join(',');
+  const devices = profileDevices(device.id);
+  const preference = db.prepare(`SELECT count(*) AS count,max(liked_at) AS latest FROM radio_likes WHERE device_id IN (${marks(devices)})`).get(...devices);
   const revision = `${scanStatus.lastFinished}:${libraryRevision()}:${preference.count}:${preference.latest}`;
   const saved = cache.get(key);
   if (saved && saved.revision === revision && Date.now() - saved.at < 600000) return saved.value;
@@ -41,12 +44,13 @@ export async function discoverySeed(device, genreIds = []) {
 // block the HTTP event loop, and has no access to the player's network requests.
 export function buildDiscoverySeed(device, genreIds = []) {
   const ids = favorites(device.id);
-  const radioLikes = db.prepare('SELECT song_id AS songId,title,artist,album,liked_at AS likedAt FROM radio_likes WHERE device_id=? ORDER BY liked_at DESC LIMIT 500').all(device.id);
+  const devices = profileDevices(device.id), list = marks(devices);
+  const radioLikes = db.prepare(`SELECT song_id AS songId,title,artist,album,max(liked_at) AS likedAt FROM radio_likes WHERE device_id IN (${list}) GROUP BY song_id ORDER BY likedAt DESC LIMIT 500`).all(...devices);
   const history = db.prepare(`SELECT track_id AS trackId, sum(listened) AS listened,
     sum(CASE WHEN listened >= min(30, duration * .35) AND listened > 0 THEN 1 ELSE 0 END) AS plays,
     max(last_seen) AS lastPlayed FROM playback_history
-    WHERE device_id=? AND started>? GROUP BY track_id ORDER BY lastPlayed DESC LIMIT 1000`).all(device.id, Date.now() - 180 * DAY);
-  const last = db.prepare('SELECT track_id, position FROM playback_history WHERE device_id=? AND listened>2 ORDER BY last_seen DESC LIMIT 1').get(device.id);
+    WHERE device_id IN (${list}) AND started>? GROUP BY track_id ORDER BY lastPlayed DESC LIMIT 1000`).all(...devices, Date.now() - 180 * DAY);
+  const last = db.prepare(`SELECT track_id, position FROM playback_history WHERE device_id IN (${list}) AND listened>2 ORDER BY last_seen DESC LIMIT 1`).get(...devices);
   const all = mixTracks();
   const byId = new Map(all.map(track => [track.id, track]));
   const artists = new Map(), genres = new Map();

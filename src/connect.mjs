@@ -3,12 +3,15 @@ import { observePulse } from './reporting.mjs';
 import { db, hash } from './db.mjs';
 import { HttpError, limit } from './auth.mjs';
 import { getTrack, trackView } from './library.mjs';
+import { sameProfile } from './profiles.mjs';
 
 db.exec(`CREATE TABLE IF NOT EXISTS control_groups (device_id TEXT PRIMARY KEY, group_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS control_invites (hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, expires INTEGER NOT NULL);`);
 const presence = new Map(), commands = new Map();
 const group = id => db.prepare('SELECT group_id FROM control_groups WHERE device_id=?').get(id)?.group_id || id;
 const online = item => item && Date.now() - item.seen < 12000;
+// Paired for Play on, or devices of the same listener (profile).
+export const related = (a, b) => group(a) === group(b) || sameProfile(a, b);
 const validId = id => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id);
 function ids(value) {
   if (!Array.isArray(value) || value.length > 200 || value.some(id => !validId(id) || !getTrack(id))) throw new HttpError(400, 'Invalid playback queue (maximum 200 tracks)');
@@ -49,12 +52,12 @@ export function pulse(device, input) {
   for (const [id,item] of presence) if (Date.now()-item.seen > 60000) { presence.delete(id); commands.delete(id); }
   return connectView(device);
 }
-// What a device sees: the linked Macs online and the commands waiting for it.
+// What a device sees: its linked devices online (Macs and phones, each can
+// control the other) and the commands waiting for it.
 export function connectView(device) {
-  const pending = (commands.get(device.id) || []).filter(item => item.expires > Date.now() && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.sender) && group(item.sender) === group(device.id));
+  const pending = (commands.get(device.id) || []).filter(item => item.expires > Date.now() && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.sender) && related(item.sender, device.id));
   commands.set(device.id,pending);
-  const ownGroup = group(device.id);
-  const devices = [...presence.values()].filter(item => item.id !== device.id && item.platform === 'macos' && online(item) && group(item.id) === ownGroup && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.id)).map(item => ({...item,state:{...item.state, tracks:item.state.trackIds.map(id => getTrack(id)).filter(Boolean).map(track => trackView(track,new Set()))}}));
+  const devices = [...presence.values()].filter(item => item.id !== device.id && online(item) && related(item.id, device.id) && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.id)).map(item => ({...item,state:{...item.state, tracks:item.state.trackIds.map(id => getTrack(id)).filter(Boolean).map(track => trackView(track,new Set()))}}));
   return {devices,commands:pending.map(({sender,expires,...command}) => command),linked:linkedDevices(device),...pairingView(device)};
 }
 // Every other device paired with this one, online or not, so either side can unpair.
@@ -80,7 +83,7 @@ export const controlGroup = group;
 export function sendCommand(device, input) {
   limit('control:' + device.id,120);
   const target = presence.get(input.target);
-  if (!online(target) || target.platform !== 'macos' || !db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(input.target) || group(input.target) !== group(device.id)) throw new HttpError(409,'Mac unavailable. Open Sterio on the linked Mac.');
+  if (!online(target) || !db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(input.target) || !related(input.target, device.id)) throw new HttpError(409,'Device unavailable. Open Sterio on it.');
   if (!['toggle','next','previous','seek','play'].includes(input.action)) throw new HttpError(400,'Unknown playback command');
   const args = {};
   if (input.action === 'seek') {
@@ -93,7 +96,7 @@ export function sendCommand(device, input) {
     args.index=input.index;
   }
   const pending = (commands.get(target.id)||[]).filter(item=>item.expires>Date.now());
-  if (pending.length >= 32) throw new HttpError(429,'Mac command queue is full');
+  if (pending.length >= 32) throw new HttpError(429,'Device command queue is full');
   const command={id:randomUUID(),action:input.action,...args,sender:device.id,expires:Date.now()+30000};
   pending.push(command); commands.set(target.id,pending);
   return {ok:true};
@@ -117,7 +120,7 @@ function pairingView(device) {
     discoverableUntil:discoverable.get(device.id) || 0,
     pairRequests:[...pairings.values()].filter(entry => entry.mac === device.id && entry.status === 'pending' && isLive(entry.phone)).map(({phone,name,code}) => ({id:phone,name,code})),
   };
-  return { nearby:[...discoverable.keys()].filter(id => id !== device.id && online(presence.get(id)) && group(id) !== own && isLive(id)).map(id => ({id,name:presence.get(id).name})) };
+  return { nearby:[...discoverable.keys()].filter(id => id !== device.id && online(presence.get(id)) && !related(id, device.id) && isLive(id)).map(id => ({id,name:presence.get(id).name})) };
 }
 export function setDiscoverable(device, input) {
   limit('discoverable:' + device.id, 30);

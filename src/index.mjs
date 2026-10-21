@@ -10,6 +10,8 @@ import { migrateSplitFolders } from './split.mjs';
 import { updateDeviceNickname, recordPlayback, rememberDelivery, trackTransfer } from './reporting.mjs';
 import { createLink, joinLink, pulse, sendCommand, decidePair, requestPair, setDiscoverable, unpair } from './connect.mjs';
 import { acceptSocket, closeSockets } from './socket.mjs';
+import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, listPlaylists, sharePlaylist, updatePlaylist } from './playlists.mjs';
+import { createProfileLink, joinProfile, leaveProfile, marks, profileDevices, profileView, renameProfile } from './profiles.mjs';
 import { addRenderer, controlRenderer, discoverRenderers, externalItem, listRenderers, noteLan, lanServerBase, playOnRenderer, publicBase, removeRenderer, streamBase } from './renderers.mjs';
 import { linkedSourceUrl, prepareDelivery, resolveDelivery } from './delivery.mjs';
 import { isPeerClient, leavePeer, linkedArtistPhoto, linkedImage, linkedMedia, pairPeer, proxyStream, shareIndex } from './peers.mjs';
@@ -54,7 +56,7 @@ async function handler(req,res) {
     const method = req.method;
     if (method === 'GET' && route === '/healthz') return json(res,200,{status:'ok',load:loadStats()});
     if (method === 'GET' && route === '/') return json(res,200,{name:'Sterio Server',message:'Connect with the Sterio app. Generate a pairing code using the NAS command line.',api:config.basePath+'/v1/info'});
-    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.1.53',apiVersion:1,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
+    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.1.57',apiVersion:1,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
     // Only the address is needed: an administrator accepts the request on this server.
     if (method === 'POST' && route === '/v1/auth/request') { limit('request:' + req.socket.remoteAddress,90); return json(res,200,requestAccess('device',await body(req),req.socket.remoteAddress)); }
     if (method === 'POST' && route.startsWith('/v1/auth/')) {
@@ -80,7 +82,7 @@ async function handler(req,res) {
         return convert ? await streamLinkedConversion(req,res,linked.id,track,convert,linkedSourceUrl(track)) : await proxyStream(req,res,linked);
       }
       const source = getTrack(stream[1]);
-      if(source && req.method==='GET') rememberDelivery(ticket.d,source.id,ticket.m,ticket.m==='pcm'?deliveredFormat(source):source.format);
+      if(source && req.method==='GET') rememberDelivery(ticket.d,source.id,({verbatim:'pcm',cueverbatim:'cue'})[ticket.m]||ticket.m,['pcm','verbatim'].includes(ticket.m)?deliveredFormat(source):source.format);
       trackTransfer(req,res,ticket.d,stream[1],ticket.m);
       return await streamTrack(req,res,stream[1],ticket.m);
     }
@@ -99,12 +101,12 @@ async function handler(req,res) {
       return res.end(index.body);
     }
     if (route === '/v1/peers/leave' && method === 'POST') { if (!peer) throw new HttpError(403,'Not a linked server'); leavePeer(device); return json(res,200,{ok:true}); }
-    if (route === '/v1/radio/likes' && method === 'GET') return json(res,200,{items:db.prepare('SELECT song_id AS songId,title,artist,album,liked_at AS likedAt FROM radio_likes WHERE device_id=? ORDER BY liked_at DESC LIMIT 500').all(device.id)});
+    if (route === '/v1/radio/likes' && method === 'GET') { const devices = profileDevices(device.id); return json(res,200,{items:db.prepare(`SELECT song_id AS songId,title,artist,album,max(liked_at) AS likedAt FROM radio_likes WHERE device_id IN (${marks(devices)}) GROUP BY song_id ORDER BY likedAt DESC LIMIT 500`).all(...devices)}); }
     if (route === '/v1/radio/likes' && ['PUT','DELETE'].includes(method)) {
       limit('radio-likes:' + device.id,60);
       const input = await body(req);
       if (typeof input.songId !== 'string' || !/^rp:[1-9][0-9]{0,15}$/.test(input.songId)) throw new HttpError(400,'Invalid radio song');
-      if (method === 'DELETE') db.prepare('DELETE FROM radio_likes WHERE device_id=? AND song_id=?').run(device.id,input.songId);
+      if (method === 'DELETE') { const devices = profileDevices(device.id); db.prepare(`DELETE FROM radio_likes WHERE device_id IN (${marks(devices)}) AND song_id=?`).run(...devices,input.songId); }
       else {
         for (const field of ['title','artist','album']) if (typeof input[field] !== 'string' || input[field].length > 500 || /[\x00-\x1f]/.test(input[field]) || (field !== 'album' && !input[field].trim())) throw new HttpError(400,'Invalid radio metadata');
         db.prepare('INSERT INTO radio_likes VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,song_id) DO UPDATE SET title=excluded.title,artist=excluded.artist,album=excluded.album,liked_at=excluded.liked_at').run(device.id,input.songId,input.title.trim(),input.artist.trim(),input.album.trim(),Date.now());
@@ -124,12 +126,12 @@ async function handler(req,res) {
     if (method === 'POST' && route === '/v1/connect/unpair') return json(res,200,unpair(device,await body(req)));
     if (method === 'POST' && route === '/v1/connect/pulse') { const input=await body(req); updateDeviceNickname(device,input); return json(res,200,{...pulse(device,input),lanBase:lanServerBase()}); }
     if (method === 'POST' && route === '/v1/connect/command') return json(res,200,sendCommand(device,await body(req)));
-    if (method === 'GET' && route === '/v1/renderers') return json(res,200,listRenderers(url.searchParams.get('queue')));
-    if (method === 'POST' && route === '/v1/renderers') { limit('renderer-add:' + device.id,20); return json(res,200,await addRenderer(await body(req),streamBase(req))); }
-    if (method === 'GET' && route === '/v1/renderers/discover') { limit('renderer-discover:' + device.id,20); return json(res,200,await discoverRenderers(String(req.headers.host || '').replace(/:\d+$/,''))); }
+    if (method === 'GET' && route === '/v1/renderers') return json(res,200,listRenderers(url.searchParams.get('queue'),device.id));
+    if (method === 'POST' && route === '/v1/renderers') { limit('renderer-add:' + device.id,20); return json(res,200,await addRenderer(await body(req),streamBase(req),device.id)); }
+    if (method === 'GET' && route === '/v1/renderers/discover') { limit('renderer-discover:' + device.id,20); return json(res,200,await discoverRenderers(String(req.headers.host || '').replace(/:\d+$/,''),device.id)); }
     if (method === 'POST' && route === '/v1/renderers/stream') return json(res,200,await externalItem(device,await body(req),publicBase(req)));
     const renderer = route.match(/^\/v1\/renderers\/([a-f0-9-]{36})(?:\/(play|command))?$/);
-    if (renderer && method === 'DELETE' && !renderer[2]) return json(res,200,await removeRenderer(renderer[1]));
+    if (renderer && method === 'DELETE' && !renderer[2]) return json(res,200,await removeRenderer(renderer[1],device.id));
     if (renderer && method === 'POST' && renderer[2] === 'play') return json(res,200,await playOnRenderer(device,renderer[1],await body(req),streamBase(req)));
     if (renderer && method === 'POST' && renderer[2] === 'command') return json(res,200,await controlRenderer(device,renderer[1],await body(req)));
     if (method === 'GET' && /^\/v1\/tracks\/[a-f0-9]{64}$/.test(route)) {
@@ -191,13 +193,27 @@ async function handler(req,res) {
       const ready=await prepareDelivery(track,await body(req));
       return json(res,ready.status,ready.body);
     }
+    if (method === 'GET' && route === '/v1/playlists') return json(res,200,listPlaylists(device));
+    if (method === 'POST' && route === '/v1/playlists') { limit('playlist-write:' + device.id,240); return json(res,200,createPlaylist(device,await body(req,524288))); }
+    if (method === 'GET' && route === '/v1/profile') return json(res,200,profileView(device));
+    if (method === 'PUT' && route === '/v1/profile') return json(res,200,renameProfile(device,await body(req)));
+    if (method === 'POST' && route === '/v1/profile/link') return json(res,200,createProfileLink(device));
+    if (method === 'POST' && route === '/v1/profile/join') { const view = joinProfile(device,await body(req)); invalidateDiscovery(device.id); return json(res,200,view); }
+    if (method === 'POST' && route === '/v1/profile/leave') { const view = leaveProfile(device); invalidateDiscovery(device.id); return json(res,200,view); }
+    const playlist = route.match(/^\/v1\/playlists\/([a-f0-9-]{36})(\/tracks|\/shares)?$/);
+    if (playlist && method === 'GET' && !playlist[2]) return json(res,200,getPlaylist(device,playlist[1]));
+    if (playlist && ['PUT','POST','DELETE'].includes(method)) limit('playlist-write:' + device.id,240);
+    if (playlist && method === 'PUT' && !playlist[2]) return json(res,200,updatePlaylist(device,playlist[1],await body(req,524288)));
+    if (playlist && method === 'PUT' && playlist[2] === '/shares') return json(res,200,sharePlaylist(device,playlist[1],await body(req)));
+    if (playlist && method === 'POST' && playlist[2] === '/tracks') return json(res,200,addToPlaylist(device,playlist[1],await body(req,524288)));
+    if (playlist && method === 'DELETE' && !playlist[2]) return json(res,200,deletePlaylist(device,playlist[1]));
     const favorite = route.match(/^\/v1\/favorites\/([a-f0-9]{64})$/);
     if (favorite && ['PUT','DELETE'].includes(method)) {
       const id = favorite[1];
       if (method === 'PUT') {
         if (!catalogHas(id)) throw new HttpError(404,'Item not found');
         db.prepare('INSERT OR IGNORE INTO favorites VALUES (?,?)').run(device.id,id);
-      } else db.prepare('DELETE FROM favorites WHERE device_id=? AND item_id=?').run(device.id,id);
+      } else { const devices = profileDevices(device.id); db.prepare(`DELETE FROM favorites WHERE device_id IN (${marks(devices)}) AND item_id=?`).run(...devices,id); }
       return json(res,200,{ok:true});
     }
     if (['GET','HEAD'].includes(method) && image) return await artwork(req,res,url,image[1]);
