@@ -10,6 +10,10 @@ import { canonicalArtist, artistNameKey, storedArtwork, reloadLibraryState } fro
 
 const root=path.join(config.data,'artwork'), previews=path.join(root,'previews');
 await mkdir(previews,{recursive:true});
+// A search name chosen on the dashboard for an album or artist whose own name
+// finds nothing (or the wrong one); automatic runs use it too.
+db.exec('CREATE TABLE IF NOT EXISTS artwork_queries (entity_id TEXT PRIMARY KEY, query TEXT NOT NULL, updated INTEGER NOT NULL)');
+const savedQuery=id=>db.prepare('SELECT query FROM artwork_queries WHERE entity_id=?').get(id)?.query||'';
 const userAgent='SterioServer/0.1.10 (https://github.com/sorinb99/sterio-server)';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const plain=value=>String(value || '').replace(/<[^>]*>/g,'').replace(/[\x00-\x1f]/g,' ').slice(0,1000);
@@ -85,7 +89,7 @@ export function undoMerge(input){if(typeof input.sourceId!=='string')throw new H
 // Linked albums and artists are included: artwork chosen here wins over their server's.
 function entities(){return [...albumViews().map(item=>({id:item.ref.itemId,kind:'album',name:item.title,artist:item.artist,year:item.year})),...groupViews('artists').map(item=>({id:item.ref.itemId,kind:'artist',name:item.title}))];}
 function entity(id){const item=entities().find(value=>value.id===id);if(!item)throw new HttpError(404,'Library item not found');return item;}
-export function artworkTools(){return {items:entities().sort((a,b)=>a.kind.localeCompare(b.kind)||a.name.localeCompare(b.name)).map(item=>({...item,downloaded:!!storedArtwork(item.id)})),job:{...job},saved:db.prepare('SELECT entity_id,provider,source_url,credit,created FROM library_artwork ORDER BY created DESC LIMIT 20').all()};}
+export function artworkTools(){return {items:entities().sort((a,b)=>a.kind.localeCompare(b.kind)||a.name.localeCompare(b.name)).map(item=>({...item,downloaded:!!storedArtwork(item.id),...(savedQuery(item.id)?{query:savedQuery(item.id)}:{})})),job:{...job},saved:db.prepare('SELECT entity_id,provider,source_url,credit,created FROM library_artwork ORDER BY created DESC LIMIT 20').all()};}
 function saveCandidates(item,results){
   const expired=db.prepare('SELECT token FROM artwork_candidates WHERE created<?').all(Date.now()-86400000);
   db.prepare('DELETE FROM artwork_candidates WHERE created<?').run(Date.now()-86400000);
@@ -95,6 +99,9 @@ function saveCandidates(item,results){
 // Artist names compared without a leading "The" (Blackbyrds, The Blackbyrds).
 const artistKey=value=>artistNameKey(value).replace(/^the /,'');
 const sameAlbum=(title,artist,item)=>titleKey(cleanAlbumTitle(title))===titleKey(cleanAlbumTitle(item.name))&&artistKey(artist)===artistKey(item.artist);
+// With a search name of the listener's own, a result counts when its title is
+// in that name ("Black Sabbath Paranoid" finds the album Paranoid).
+const inQuery=(title,query)=>{const key=titleKey(cleanAlbumTitle(title));return !!query&&key.length>0&&(' '+titleKey(query)+' ').includes(' '+key+' ');};
 // Albums before compilations, EPs and singles of the same name (Paranoid the
 // album, not the single).
 const releaseRank={album:0,compile:1,ep:2,single:3};
@@ -108,11 +115,11 @@ async function deezerAlbums(item,query,automatic){
     const more=await json('https://api.deezer.com/search/album?limit=25&q='+encodeURIComponent(item.artist+' '+cleanAlbumTitle(item.name)));
     const ids=new Set(albums.map(album=>album.id));albums=albums.concat((more.data||[]).filter(album=>!ids.has(album.id)));
   }
-  return albums.filter(album=>album.cover_xl&&!/\/images\/cover\/\//.test(album.cover_xl)).map(album=>({title:album.title,subtitle:[album.artist?.name,album.record_type].filter(Boolean).join(' · '),provider:'Deezer',imageUrl:imageURL(album.cover_xl),sourceUrl:imageURL(album.link)||'https://www.deezer.com/album/'+album.id,credit:'Cover · Deezer',exact:sameAlbum(album.title,album.artist?.name||'',item),rank:releaseRank[album.record_type]??2})).filter(result=>result.imageUrl).sort((a,b)=>b.exact-a.exact||a.rank-b.rank).slice(0,automatic?4:12);
+  return albums.filter(album=>album.cover_xl&&!/\/images\/cover\/\//.test(album.cover_xl)).map(album=>({title:album.title,subtitle:[album.artist?.name,album.record_type].filter(Boolean).join(' · '),provider:'Deezer',imageUrl:imageURL(album.cover_xl),sourceUrl:imageURL(album.link)||'https://www.deezer.com/album/'+album.id,credit:'Cover · Deezer',exact:sameAlbum(album.title,album.artist?.name||'',item)||inQuery(album.title,query),rank:releaseRank[album.record_type]??2})).filter(result=>result.imageUrl).sort((a,b)=>b.exact-a.exact||a.rank-b.rank).slice(0,automatic?4:12);
 }
 async function itunesAlbums(item,query,automatic){
   const data=await json('https://itunes.apple.com/search?media=music&entity=album&limit=25&term='+encodeURIComponent(query||item.artist+' '+cleanAlbumTitle(item.name)));
-  return (data.results||[]).filter(album=>album.artworkUrl100).map(album=>{const single=/ - (Single|EP)$/.test(album.collectionName);const title=album.collectionName.replace(/ - (Single|EP)$/,'');return {title,subtitle:[album.artistName,album.releaseDate?.slice(0,4),single?album.collectionName.match(/(Single|EP)$/)[1]:''].filter(Boolean).join(' · '),provider:'Apple Music',imageUrl:imageURL(album.artworkUrl100.replace(/\/\d+x\d+bb\./,'/1000x1000bb.')),sourceUrl:imageURL(album.collectionViewUrl)||'https://music.apple.com',credit:'Cover · Apple Music',exact:sameAlbum(title,album.artistName,item),rank:single?3:0};}).filter(result=>result.imageUrl).sort((a,b)=>b.exact-a.exact||a.rank-b.rank).slice(0,automatic?4:12);
+  return (data.results||[]).filter(album=>album.artworkUrl100).map(album=>{const single=/ - (Single|EP)$/.test(album.collectionName);const title=album.collectionName.replace(/ - (Single|EP)$/,'');return {title,subtitle:[album.artistName,album.releaseDate?.slice(0,4),single?album.collectionName.match(/(Single|EP)$/)[1]:''].filter(Boolean).join(' · '),provider:'Apple Music',imageUrl:imageURL(album.artworkUrl100.replace(/\/\d+x\d+bb\./,'/1000x1000bb.')),sourceUrl:imageURL(album.collectionViewUrl)||'https://music.apple.com',credit:'Cover · Apple Music',exact:sameAlbum(title,album.artistName,item)||inQuery(title,query),rank:single?3:0};}).filter(result=>result.imageUrl).sort((a,b)=>b.exact-a.exact||a.rank-b.rank).slice(0,automatic?4:12);
 }
 // Deezer first (large covers, generous limits), Apple Music next, then
 // MusicBrainz and the Cover Art Archive. Automatic runs stop at the first
@@ -187,7 +194,8 @@ function commonsCandidate(page,title){
 async function deezerArtists(item,query,automatic){
   const data=await json('https://api.deezer.com/search/artist?limit=10&q='+encodeURIComponent(query||item.name));
   const artists=(data.data||[]).filter(artist=>artist.picture_xl&&!/\/images\/artist\/\//.test(artist.picture_xl));
-  const named=artists.filter(artist=>artistKey(artist.name)===artistKey(item.name));
+  const wanted=artistKey(query||item.name);
+  const named=artists.filter(artist=>artistKey(artist.name)===wanted);
   let chosen=named.length===1?named[0]:null;
   if(named.length>1){
     named.sort((a,b)=>(b.nb_fan||0)-(a.nb_fan||0));
@@ -218,7 +226,10 @@ async function artistCandidates(item,query,automatic){
   for(const page of pages){const result=commonsCandidate(page,query||item.name);if(result&&!seen.has(result.imageUrl)){seen.add(result.imageUrl);linked.push(result);}if(linked.length>=16)break;}
   return linked;
 }
-export async function searchArtwork(input,automatic=false,known){const item=known||entity(input.entityId);const query=String(input.query||'').trim().slice(0,200);return {items:saveCandidates(item,item.kind==='album'?await albumCandidates(item,query,automatic):await artistCandidates(item,query,automatic))};}
+export async function searchArtwork(input,automatic=false,known){const item=known||entity(input.entityId);let query=String(input.query||'').trim().slice(0,200);
+  // A name typed on the dashboard is kept for this item; an empty field forgets it.
+  if(!automatic&&input.query!==undefined){if(query)db.prepare('INSERT OR REPLACE INTO artwork_queries VALUES (?,?,?)').run(item.id,query,Date.now());else db.prepare('DELETE FROM artwork_queries WHERE entity_id=?').run(item.id);}
+  if(automatic&&!query)query=savedQuery(item.id);return {items:saveCandidates(item,item.kind==='album'?await albumCandidates(item,query,automatic):await artistCandidates(item,query,automatic))};}
 function candidate(token){if(typeof token!=='string'||!/^[a-f0-9]{48}$/.test(token))throw new HttpError(400,'Invalid artwork choice');const row=db.prepare('SELECT * FROM artwork_candidates WHERE token=? AND created>?').get(token,Date.now()-86400000);if(!row)throw new HttpError(404,'Artwork choice expired. Search again.');return {...row,value:JSON.parse(row.value)};}
 const previewJobs=new Map();
 async function renderPreview(token){

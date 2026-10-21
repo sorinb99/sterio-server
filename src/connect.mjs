@@ -61,7 +61,7 @@ export function connectView(device) {
   const devices = [...presence.values()].filter(item => item.id !== device.id && online(item) && related(item.id, device.id) && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.id)).map(item => ({...item,state:{...item.state, tracks:item.state.trackIds.map(id => getTrack(id)).filter(Boolean).map(track => trackView(track,new Set()))}}));
   // Server administrators also see the connection requests waiting (the app notifies them).
   const admin = !!db.prepare('SELECT 1 FROM device_admins WHERE device_id=?').get(device.id);
-  return {devices,commands:pending.map(({sender,expires,...command}) => command),linked:linkedDevices(device),...pairingView(device),...(admin ? {connectionRequests:pendingRequests()} : {})};
+  return {devices,commands:pending.map(({expires,...command}) => command),linked:linkedDevices(device),...pairingView(device),...(admin ? {connectionRequests:pendingRequests()} : {})};
 }
 // Every other device paired with this one, online or not, so either side can unpair.
 function linkedDevices(device) {
@@ -87,7 +87,7 @@ export function sendCommand(device, input) {
   limit('control:' + device.id,120);
   const target = presence.get(input.target);
   if (!online(target) || !db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(input.target) || !related(input.target, device.id)) throw new HttpError(409,'Device unavailable. Open Sterio on it.');
-  if (!['toggle','next','previous','seek','play'].includes(input.action)) throw new HttpError(400,'Unknown playback command');
+  if (!['toggle','pause','next','previous','seek','play'].includes(input.action)) throw new HttpError(400,'Unknown playback command');
   const args = {};
   if (input.action === 'seek') {
     if (!Number.isFinite(input.position) || input.position < 0 || input.position > 604800) throw new HttpError(400,'Invalid seek position');
@@ -97,6 +97,9 @@ export function sendCommand(device, input) {
     args.trackIds=ids(input.trackIds);
     if (!args.trackIds.length || !Number.isInteger(input.index) || input.index<0 || input.index>=args.trackIds.length) throw new HttpError(400,'Invalid track index');
     args.index=input.index;
+    // The listening session moves whole: where it was, and whether it played.
+    if (Number.isFinite(input.position) && input.position >= 0 && input.position <= 604800) args.position=input.position;
+    if (input.paused === true) args.paused=true;
   }
   const pending = (commands.get(target.id)||[]).filter(item=>item.expires>Date.now());
   if (pending.length >= 32) throw new HttpError(429,'Device command queue is full');

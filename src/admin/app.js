@@ -123,7 +123,7 @@ const artworkText=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u0
 function artworkLabel(item){return `${item.artist?item.artist+' — ':''}${item.name}${item.year?' · '+item.year:''}`;}
 function closeArtworkPicker(){artworkPickerOpen=false;artworkBrowse=false;artworkActive=-1;renderArtworkPicker();}
 function selectArtworkItem(item){
-  $('artwork-entity').value=item.id;$('artwork-filter').value=artworkLabel(item);
+  $('artwork-entity').value=item.id;$('artwork-filter').value=artworkLabel(item);$('artwork-query').value=item.query||'';
   $('artwork-results').replaceChildren();$('artwork-message').textContent='';closeArtworkPicker();$('artwork-filter').focus();
 }
 function renderArtworkPicker(){

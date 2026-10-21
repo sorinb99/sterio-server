@@ -64,7 +64,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 `playlists`, `playlist_shares` (playlists.mjs); `playback_history`,
 `playback_listeners` (reporting.mjs); `renderers` (renderers.mjs);
 `artist_aliases`, `library_artwork`, `metadata_cache`, `artwork_candidates`
-(library-state.mjs). Migrations are additive and run at start.
+(library-state.mjs); `artwork_queries` (curation.mjs). Migrations are additive and run at start.
 
 ## Modules (`src/`)
 
@@ -80,11 +80,11 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | `media.mjs` | Streaming with Range, conversions (ffmpeg), conversion cache and pruning |
 | `delivery.mjs`, `verbatim.mjs` | Live delivery while converting: FLAC with VERBATIM frames, layout fixed in advance so players can seek a file still being written |
 | `images.mjs` | Artwork and thumbnails |
-| `curation.mjs` | Dashboard artist merges and artwork: automatic job (6 items at a time) and manual search. Providers: Deezer (first), Apple Music (iTunes Search), Cover Art Archive via MusicBrainz, Wikimedia Commons via Wikidata; each host has its own pace (MusicBrainz 1/s, iTunes 1 per 3 s, Deezer ~8/s); JSON cached 48 h in `metadata_cache` |
+| `curation.mjs` | Dashboard artist merges and artwork: automatic job (6 items at a time) and manual search. Providers: Deezer (first), Apple Music (iTunes Search), Cover Art Archive via MusicBrainz, Wikimedia Commons via Wikidata; each host has its own pace (MusicBrainz 1/s, iTunes 1 per 3 s, Deezer ~8/s); JSON cached 48 h in `metadata_cache`. A search name typed on the dashboard is kept per item (`artwork_queries`), prefilled there and used by the automatic job; a result counts as a match when its title is contained in that name (albums) or equals it (artists) |
 | `discovery.mjs` (+ `discovery-worker.mjs`) | Home data per profile, built in a worker thread |
 | `profiles.mjs` | Listener profiles: created on first use (devices paired for Play on share one), link codes, join, leave; `profileOf`, `profileDevices`, `sameProfile` |
 | `playlists.mjs` | Playlists owned by a profile, shares (read-only) to other profiles |
-| `connect.mjs` | Play on: presence from pulses, device list (all related devices, Macs and phones), command queue, pairing (codes and discoverable Mac), `related(a,b)` = same control group or same profile |
+| `connect.mjs` | Play on: presence from pulses, device list (all related devices, Macs and phones), command queue (`toggle`, `pause`, `next`, `previous`, `seek`, `play` with track ids, index, optional `position` and `paused`; each delivered command carries its `sender`), pairing (codes and discoverable Mac), `related(a,b)` = same control group or same profile |
 | `socket.mjs` | WebSocket for Play on: pulses, commands, pushes every device's change to related devices |
 | `renderers.mjs` | Network streamers: SSDP/BluOS discovery, UPnP AVTransport, the server's own queue per streamer. DSD is sent natively only when the renderer's `GetProtocolInfo` sink lists a DSD MIME, else as PCM FLAC |
 | `peers.mjs` | Linked servers (one server reads another's shared index) |
@@ -120,7 +120,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 - Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` archives, signs
   and exports a pkg into `work/mac-server/`; upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
-  Build numbers so far: 0.1.58 (6).
+  Build numbers so far: 0.1.58 (6), 0.1.61 (7).
 
 ## Rules
 
