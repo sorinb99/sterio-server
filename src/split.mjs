@@ -7,6 +7,23 @@ import { cueTracks, getCatalog, getTrack, musicPath, processFile, scanLibrary, L
 // get ordinary tracks: fast start and exact seeking. The image and CUE stay
 // untouched; a marker ties the folder to the exact source version it came from.
 export const splitStatus = { running: false, force: false, total: 0, done: 0, skipped: 0, current: '', errors: [], finished: null, stop: false };
+// FFmpeg encodes FLAC on one core: chapters are written side by side instead,
+// up to SPLIT_WORKERS at once across albums. nice keeps playback and the API
+// ahead of them when the processor is full.
+let running = 0; const waiting = [];
+async function slot(work) {
+  if (running >= config.splitWorkers) await new Promise(resolve => waiting.push(resolve));
+  running++;
+  try { return await work(); } finally { running--; waiting.shift()?.(); }
+}
+// Without nice (it could not be started), chapters run at normal priority.
+let canNice = process.platform !== 'win32';
+async function niced(command, args, timeout) {
+  if (canNice) try { return await processFile('nice', ['-n', '10', command, ...args], timeout); }
+  // 126/127: nice ran but could not start the command (a sandbox, a missing PATH).
+  catch (error) { if (!['ENOENT', 'EACCES', 'EPERM'].includes(error.code) && !/^nice failed \((126|127)\)/.test(error.message)) throw error; canNice = false; }
+  return processFile(command, args, timeout);
+}
 const safeName = value => String(value).replace(/[\/\\:*?"<>|\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 120) || 'Track';
 function splitSets() {
   const sets = new Map();
@@ -69,7 +86,7 @@ async function writeChapter(set, chapter, index, file) {
   try {
     // Same sample-exact extraction as CUE delivery: accurate input seek, then
     // atrim fixes the output sample count. Encoded once, at a normal FLAC level.
-    await processFile('ffmpeg', ['-v','error','-nostdin','-y','-protocol_whitelist','file','-ss',(startSample / rate).toFixed(9),'-i',await musicPath(source.path),
+    await niced('ffmpeg', ['-v','error','-nostdin','-y','-protocol_whitelist','file','-ss',(startSample / rate).toFixed(9),'-i',await musicPath(source.path),
       ...(last ? [] : ['-t',(samples / rate).toFixed(9)]),'-map','0:a:0','-map_metadata','-1','-vn','-sn','-dn',...(last ? [] : ['-af',`atrim=end_sample=${samples}`]),...metadata,
       '-c:a','flac','-compression_level','5','-frame_size','4096','-f','flac',temp], 30 * 60 * 1000);
     // Seek points make HTTP seeking in AVFoundation exact and immediate.
@@ -89,11 +106,13 @@ async function splitAlbum(set) {
   const marker = { version: 2, complete: false, source: set.source.path, cue: set.chapters[0].cuePath, size: set.source.size, mtime: set.source.mtime, files };
   // Claim the folder first, so an interrupted run can resume it safely.
   await writeFile(path.join(directory, SPLIT_MARKER), JSON.stringify(marker, null, 2));
-  for (let index = 0; index < set.chapters.length; index++) {
+  const results = await Promise.allSettled(set.chapters.map((chapter, index) => slot(async () => {
     if (splitStatus.stop) throw new Error('Stopped');
-    splitStatus.current = `${set.chapters[index].album} · ${files[index].file}`;
-    await writeChapter(set, set.chapters[index], index, files[index].file);
-  }
+    splitStatus.current = `${chapter.album} · ${files[index].file}`;
+    await writeChapter(set, chapter, index, files[index].file);
+  })));
+  const failed = results.find(result => result.status === 'rejected');
+  if (failed) throw failed.reason;
   // Completed last: an interrupted album is never mistaken for a complete one.
   await writeFile(path.join(directory, SPLIT_MARKER), JSON.stringify({ ...marker, complete: true, created: new Date().toISOString() }, null, 2));
   // A forced re-split can rename tracks: remove FLAC files the marker no longer lists.
@@ -111,9 +130,12 @@ export function startSplit({ force = false } = {}) {
       const sets = splitSets(), files = indexedFiles(), todo = [];
       for (const set of sets) if (!splitStatus.force && await current(set, files)) splitStatus.skipped++; else todo.push(set);
       splitStatus.total = todo.length;
-      console.log(`Album split${splitStatus.force ? ' (forced)' : ''}: ${todo.length} to split, ${splitStatus.skipped} already split`);
-      for (const set of todo) {
-        if (splitStatus.stop) break;
+      console.log(`Album split${splitStatus.force ? ' (forced)' : ''}: ${todo.length} to split, ${splitStatus.skipped} already split, ${config.splitWorkers} at a time`);
+      // Two albums in progress keep every core busy while one finishes its
+      // last, longest chapters.
+      let next = 0, halted = false;
+      const albums = async () => { while (next < todo.length && !splitStatus.stop && !halted) {
+        const set = todo[next++];
         const started = Date.now();
         try {
           await splitAlbum(set);
@@ -122,9 +144,10 @@ export function startSplit({ force = false } = {}) {
           if (splitStatus.stop) break;
           const reason = ['EROFS', 'EACCES', 'EPERM'].includes(error.code) ? 'The music folder is read-only for the server. Set MUSIC_ACCESS=rw in .env and restart the container.' : error.message;
           splitStatus.errors.push(`${set.source.path}: ${reason}`); console.warn(`Album split failed: ${set.source.path}: ${error.message}`);
-          if (reason !== error.message) break;
+          if (reason !== error.message) halted = true;
         } finally { splitStatus.done++; }
-      }
+      } };
+      await Promise.all([albums(), albums()]);
     } finally {
       Object.assign(splitStatus, { running: false, current: '', finished: new Date().toISOString() });
       void scanLibrary().catch(error => console.error('Scan after split:', error.message));

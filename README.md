@@ -54,6 +54,7 @@ SCAN_INTERVAL_SECONDS=900
 CACHE_MAX_MB=4096
 # Empty: one per CPU core minus one, up to 4.
 TRANSCODE_WORKERS=
+SPLIT_WORKERS=
 MAX_PCM_RATE=192000
 ```
 
@@ -443,6 +444,12 @@ the slower pulses.
 - `TRANSCODE_WORKERS` defaults to one conversion per CPU core minus one (up to
   4); up to 64 more wait in the queue. Up to 1024 connections and 512 app
   sockets.
+- `SPLIT_WORKERS` defaults to one CUE chapter per CPU core (half the cores in
+  Sterio Server for Mac): chapters of up to two albums are encoded side by
+  side, at a lower priority (nice 10) than streaming.
+- Automatic artwork looks up six items at a time: Deezer first, then Apple
+  Music, Cover Art Archive (MusicBrainz) and Wikimedia Commons, each at its own
+  rate limit.
 - `GET /healthz` reports memory, event-loop delay, open audio streams and app
   sockets. The log prints the same line every hour, or at once when the event
   loop p99 reaches 100 ms.

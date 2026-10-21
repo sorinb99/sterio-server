@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: sterio-server:0.1.57
+    image: sterio-server:0.1.58
     build: .
     container_name: sterio
     restart: unless-stopped
@@ -24,6 +24,7 @@ services:
       CACHE_MAX_MB: "${CACHE_MAX_MB:-20480}"
       CACHE_MAX_DAYS: "${CACHE_MAX_DAYS:-30}"
       TRANSCODE_WORKERS: "${TRANSCODE_WORKERS:-}"
+      SPLIT_WORKERS: "${SPLIT_WORKERS:-}"
     volumes:
       - "${MUSIC_PATH:?Set MUSIC_PATH in .env}:/music:${MUSIC_ACCESS:-ro}"
       - "${DATA_PATH:?Set DATA_PATH in .env}:/data"

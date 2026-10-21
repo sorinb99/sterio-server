@@ -25,6 +25,9 @@ export const config = {
   cacheDays: integer('CACHE_MAX_DAYS', 30, 1, 3650),
   // Conversions in parallel: one core stays free for the API and streaming.
   workers: integer('TRANSCODE_WORKERS', Math.max(1, Math.min(4, os.availableParallelism() - 1)), 1, 16),
+  // Album splitting, at a lower priority than streaming: every core on a
+  // NAS, half of them on a Mac, the computer someone is working at.
+  splitWorkers: integer('SPLIT_WORKERS', process.platform === 'darwin' ? Math.max(1, Math.floor(os.availableParallelism() / 2)) : os.availableParallelism(), 1, 32),
   tlsCert: process.env.TLS_CERT_FILE,
   tlsKey: process.env.TLS_KEY_FILE,
   // Address network streamers use to fetch audio, e.g. http://192.168.1.10:7766
