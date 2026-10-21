@@ -541,3 +541,7 @@ The dashboard uses the Sterio colours (Petrol & Peach) and logo, with the logo a
 ### 0.1.53: the ribbon logo and a menu bar item on the Mac
 
 The Sterio logo is now the ribbon S, on the dashboard (and as its browser icon) and on the Mac server's peach icon. The Mac server puts the Sterio mark in the menu bar; its menu shows whether the server runs, the library (albums, tracks, devices, scanning), the address phones use (click to copy), and Open Dashboard, Choose Music Folder, Show Music in Finder, Open at Login (macOS 13 and later), Show Server Log and Quit. A folder chosen there restarts the server with it, like one chosen on the dashboard.
+
+### 0.2.0: new version numbering
+
+Same code as 0.1.62. From here on the server follows the app's rules: PATCH for fixes, MINOR for a new feature or API, 1.0 with the public release.

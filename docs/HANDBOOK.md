@@ -107,7 +107,9 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 ## Build and deploy
 
 - Version: `package.json`, `compose.yaml` (`image:`) and `src/index.mjs`
-  (`/v1/info`) — change all three together.
+  (`/v1/info`) — change all three together. Same rules as the app
+  (`../sterio/docs/VERSIONING.md`): PATCH for fixes, MINOR for a feature or a
+  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62.
 - Docker image (built on this Mac for the NAS):
   `docker buildx build --platform linux/amd64 -t sterio-server:$V --load . && docker save sterio-server:$V | gzip > work/sterio-server-$V-linux-amd64.tar.gz`.
   The deliverable `builds/Sterio-Server-Docker-$V.zip` holds `compose.yaml`,
@@ -121,7 +123,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 - Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` archives, signs
   and exports a pkg into `work/mac-server/`; upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
-  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8).
+  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9).
 
 ## Rules
 
@@ -133,5 +135,5 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
   `node --check`. A quick one-off script against a temporary `DATA_DIR` in the
   scratchpad is fine to verify a code path.
 - Code style: compact, comments explain why; keep each module's density.
-- Commit only when asked: `0.1.N: what changed`, ending with
+- Commit messages: `0.2.N: what changed`, ending with
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
