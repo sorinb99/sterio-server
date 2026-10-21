@@ -124,6 +124,10 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
   and exports a pkg into `work/mac-server/`; upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
   Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9).
+- TestFlight via the App Store Connect API: key `62BSTYTAWV` (App Manager) in
+  `~/.appstoreconnect/private_keys/` (never read or print it).
+  `node work/testflight-expire.mjs` lists the app's 1.x and the server's 0.1.x
+  builds still active; `--expire` expires them (can't be undone; ask first).
 
 ## Rules
 
