@@ -357,7 +357,7 @@ async function streamGrowing(req, res, state, destination) {
     res.end();
   } finally { load.stream(-1); await handle.close().catch(() => {}); }
 }
-function conversionSource(track) { return track.sourceId ? getTrack(track.sourceId) : track; }
+export function conversionSource(track) { return track.sourceId ? getTrack(track.sourceId) : track; }
 // waitMs lets /prepare answer as soon as a short job finishes, instead of the
 // client discovering it on its next one-second poll.
 export async function prepareConversion(track, mode = 'pcm', waitMs = 0) {

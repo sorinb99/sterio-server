@@ -3,13 +3,17 @@ import { HttpError, streamTicket } from './auth.mjs';
 import { rememberDelivery } from './reporting.mjs';
 import { linkedHeader, linkedSource, rememberLinked } from './peers.mjs';
 import { verbatimBits } from './verbatim.mjs';
-import { deliveredFormat, canDeliverCueFlac, canStreamCue, needsConversion, needsLosslessRepack, prepareConversion, prepareLinkedConversion, shortFlacFrames } from './media.mjs';
+import { conversionSource, deliveredFormat, canDeliverCueFlac, canStreamCue, needsConversion, needsLosslessRepack, prepareConversion, prepareLinkedConversion, shortFlacFrames } from './media.mjs';
 // Apps that opt in play DSD → PCM and CUE chapters while the server prepares
 // them (verbatim FLAC, see verbatim.mjs). CUE chapters inside a DSD image
 // keep the finished file.
 const streams = input => input.pcmDelivery === 'flac-verbatim-v1';
 const verbatim = (track, input) => track.dsd && !track.segment && streams(input);
 const reported = mode => ({ verbatim:'pcm', cueverbatim:'cue' })[mode] || mode;
+// Android has no ALAC decoder: an app that says so (alacDecoder:false) gets
+// ALAC repacked as FLAC, losslessly, like FLAC files Apple can't decode.
+const alacRepack = (track, input) => input.alacDecoder === false && String(conversionSource(track).format.codec).toLowerCase() === 'alac';
+const repackFor = async (track, input) => alacRepack(track, input) || await needsLosslessRepack(track);
 const announced = mode => mode === 'verbatim' || mode === 'cueverbatim' ? { pcmDelivery:'flac-verbatim-v1' } : {};
 // One delivery decision for app devices and network streamers alike.
 // sourceOnly: a linked server asks for the original and converts it itself.
@@ -22,18 +26,18 @@ export async function resolveDelivery(device, track, input) {
   const cue = !plain && !conversion && input.cueDelivery === 'flac-track-v1' && canDeliverCueFlac(track);
   const cueMode = cue && streams(input) && canStreamCue(track) ? 'cueverbatim' : 'cue';
   if (cue) await prepareConversion(track, cueMode);
-  const repack = !plain && !cue && !conversion && await needsLosslessRepack(track);
+  const repack = !plain && !cue && !conversion && await repackFor(track, input);
   const mode = cue ? cueMode : conversion ? (verbatim(track, input) ? 'verbatim' : 'pcm') : repack ? 'lossless' : 'original';
   const mediaId = cue ? track.id : track.sourceId||track.id;
   rememberDelivery(device.id,track.sourceId||track.id,reported(mode),conversion ? deliveredFormat(track) : track.format);
-  return { status:200, body:{ mode: conversion ? 'transcode' : cue || repack ? 'lossless' : 'original', standaloneCue:cue, mediaSourceId:mediaId, segment:cue ? null : track.segment, deliveredFormat:conversion ? deliveredFormat(track) : track.format, ...announced(mode), path:config.basePath+`/v1/stream/${mediaId}?ticket=`+streamTicket(mediaId,device.id,mode) } };
+  return { status:200, body:{ mode: conversion ? 'transcode' : cue || repack ? 'lossless' : 'original', standaloneCue:cue, mediaSourceId:mediaId, segment:cue ? null : track.segment, deliveredFormat:conversion ? deliveredFormat(track) : repack && alacRepack(track, input) ? { ...track.format, codec:'flac', container:'flac' } : track.format, ...announced(mode), path:config.basePath+`/v1/stream/${mediaId}?ticket=`+streamTicket(mediaId,device.id,mode) } };
 }
 export async function prepareDelivery(track, input) {
   if (track.remote) return prepareLinked(track, input);
   if (input.allowConversion!==true || (track.dsd && input.allowDsdToPcm!==true)) throw new HttpError(403,'Explicit conversion permission is required');
   const cue = input.cueDelivery === 'flac-track-v1' && canDeliverCueFlac(track);
   const live = cue ? streams(input) && canStreamCue(track) : verbatim(track, input);
-  const ready = await prepareConversion(track, cue ? (live ? 'cueverbatim' : 'cue') : live ? 'verbatim' : await needsLosslessRepack(track) ? 'lossless' : 'pcm', 8000);
+  const ready = await prepareConversion(track, cue ? (live ? 'cueverbatim' : 'cue') : live ? 'verbatim' : await repackFor(track, input) ? 'lossless' : 'pcm', 8000);
   return { status:ready?200:202, body:{ ready, retryAfterMs:cue || live ? 200 : 1000 } };
 }
 

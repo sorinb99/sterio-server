@@ -77,7 +77,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | `library-state.mjs` | Artist aliases (merges) and chosen artwork, kept in memory |
 | `cue.mjs` | CUE parsing (metadata only) |
 | `split.mjs` | Writes CUE chapters as FLAC files in a hidden `.sterio-tracks` folder with a `.sterio-split.json` marker; chapters encoded in parallel (`SPLIT_WORKERS`), two albums in flight |
-| `media.mjs` | Streaming with Range, conversions (ffmpeg), conversion cache and pruning |
+| `media.mjs`, `delivery.mjs` | Streaming with Range, conversions (ffmpeg), conversion cache and pruning. `resolveDelivery` picks original / lossless repack / PCM conversion / CUE; lossless repack (FLAC, frame size 4096) covers FLAC with frames Apple can't decode and ALAC for apps that send `alacDecoder:false` (Android) |
 | `delivery.mjs`, `verbatim.mjs` | Live delivery while converting: FLAC with VERBATIM frames, layout fixed in advance so players can seek a file still being written |
 | `images.mjs` | Artwork and thumbnails |
 | `curation.mjs` | Dashboard artist merges and artwork: automatic job (6 items at a time) and manual search. Providers: Deezer (first), Apple Music (iTunes Search), Cover Art Archive via MusicBrainz, Wikimedia Commons via Wikidata; each host has its own pace (MusicBrainz 1/s, iTunes 1 per 3 s, Deezer ~8/s); JSON cached 48 h in `metadata_cache`. A search name typed on the dashboard is kept per item (`artwork_queries`), prefilled there and used by the automatic job; a result counts as a match when its title is contained in that name (albums) or equals it (artists) |
@@ -121,7 +121,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 - Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` archives, signs
   and exports a pkg into `work/mac-server/`; upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
-  Build numbers so far: 0.1.58 (6), 0.1.61 (7).
+  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8).
 
 ## Rules
 
