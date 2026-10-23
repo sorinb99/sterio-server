@@ -30,7 +30,7 @@ function remember(key, value) {
 // (linked servers ask for it to decide whose artist photo to show).
 export async function thumbnailPath(id, requestedWidth, {portraitOnly = false} = {}) {
   const width = imageWidth(requestedWidth), canonical = canonicalArtist(id, '').id;
-  const key = canonical + ':' + width + ':' + portraitOnly + ':' + artworkTag(canonical, 'front-v3') + ':' + libraryRevision();
+  const key = canonical + ':' + width + ':' + portraitOnly + ':' + artworkTag(canonical, 'front-v4') + ':' + libraryRevision();
   const saved = recent.get(key);
   if (saved && Date.now() - saved.at < 300000) {
     if (!saved.file) return null;

@@ -212,7 +212,8 @@ export function getCatalog() {
   if (catalogVersion !== version) { catalog = db.prepare('SELECT metadata FROM tracks').all().map(row => decodeMetadata(row.metadata)); catalogVersion = version; }
   return catalog;
 }
-export function cueTracks() {
+export function cueTracks() { return cached('cueTracks',()=>rawCueTracks().map(discForm)); }
+function rawCueTracks() {
   const rows=db.prepare('SELECT cue_tracks.metadata FROM cue_tracks JOIN tracks ON tracks.id=cue_tracks.source_id ORDER BY cue_tracks.cue_path, cue_tracks.id').all().map(row=>decodeMetadata(row.metadata));
   const chosen=new Map();
   return rows.filter(item=> { if(!chosen.has(item.sourceId)) chosen.set(item.sourceId,item.cuePath); return chosen.get(item.sourceId)===item.cuePath; }).map(applyArtistAlias);
@@ -234,10 +235,11 @@ function currentSplits() {
   splitVersion=version; return splitFolders;
 }
 function localBrowsing() { return cached('local',buildLocalBrowsing); }
-const chaptersBySource=()=>cached('chaptersBySource',()=>new Map(cueTracks().map(item=>[item.sourceId,item])));
+const chaptersBySource=()=>cached('chaptersBySource',()=>new Map(rawCueTracks().map(item=>[item.sourceId,item])));
 // A file as the library shows it: an image with its CUE album name, a split
 // track in the image's album (its cover, its artist).
-function browsingForm(item) {
+function browsingForm(item) { return discForm(browsingFormOf(item)); }
+function browsingFormOf(item) {
   const chapters=chaptersBySource(), cue=chapters.get(item.id);
   if(cue) return applyArtistAlias({...item,album:cue.album,albumArtist:cue.albumArtist,artistId:cue.artistId});
   const source=currentSplits().get(path.dirname(item.path));
@@ -248,6 +250,50 @@ function buildLocalBrowsing() {
   currentSplits();
   // An unfinished or outdated split folder is hidden, never a duplicate album.
   return getCatalog().filter(item=>!splitPending.has(path.dirname(item.path))).map(browsingForm);
+}
+// Multi-disc albums: the discs of one album sit in folders such as "CD 1",
+// "Disc 2", "CD 02 - Covers" or "Album (Deluxe) CD 2", often tagged
+// "Album CD1" / "Album (Disc 2)" or with no disc number at all. Their tracks
+// join one album (the lowest disc's ID, so favorites stay), titled without the
+// disc marker, each track keeping its disc. A folder named only by its disc
+// ("CD1", "Disc 2 - Covers") belongs to its parent album whatever the tags say;
+// one that only ends with a disc number joins discs whose titles match.
+const discMarker=/^(?:cd|disc|disk)[ ._-]*(\d{1,2})(?!\d)(?:\s*[-–:.]\s*(\D*))?$/i;
+const discSuffix=/[ ._-](?:cd|disc|disk)[ ._-]*(\d{1,2})$/i;
+export function discFolder(name) {
+  let match=name.match(discMarker);
+  if(match) return {disc:Number(match[1]),title:(match[2]||'').trim(),only:true};
+  match=name.match(discSuffix);
+  return match ? {disc:Number(match[1]),title:'',only:false} : null;
+}
+export const withoutDisc=title=>title
+  .replace(/\s*[([]\s*(?:cd|disc|disk)[ ._-]*\d{1,2}\s*[)\]]/gi,'')
+  .replace(/[\s,]*(?:cd|disc|disk)[ ._-]*\d{1,2}(?=\s*[)\]])/gi,'')
+  .replace(/[\s,:–-]*(?:cd|disc|disk)[ ._-]*\d{1,2}\s*$/i,'')
+  .trim() || title.trim();
+function discPlace(item) {
+  const folder=path.dirname(item.splitSource || item.path || ''), found=discFolder(path.basename(folder));
+  if(!found || item.remote) return null;
+  const album=path.dirname(folder);
+  const key=found.only ? `${album}\0${matchKey(item.albumArtist)}` : `${album}\0${matchKey(item.albumArtist)}\0${matchKey(withoutDisc(item.album))}`;
+  return {...found,key,disc:item.disc>1 ? item.disc : found.disc};
+}
+// Each multi-disc album's ID and title, from its lowest disc.
+function discAlbums() {
+  return cached('discAlbums',()=>{
+    const albums=new Map();
+    for(const item of getCatalog().map(browsingFormOf).concat(rawCueTracks())) {
+      const place=discPlace(item); if(!place) continue;
+      const known=albums.get(place.key);
+      if(!known || place.disc<known.disc || (place.disc===known.disc && item.albumId<known.albumId)) albums.set(place.key,{disc:place.disc,albumId:item.albumId,album:withoutDisc(item.album)});
+    }
+    return albums;
+  });
+}
+function discForm(item) {
+  const place=discPlace(item); if(!place) return item;
+  const album=discAlbums().get(place.key);
+  return album ? {...item,albumId:album.albumId,album:album.album,disc:place.disc,...(place.title?{discTitle:place.title}:{})} : item;
 }
 // Linked servers (peers.mjs keeps peer_tracks in sync with their shared index).
 // Each remote track gets its own ID here. A song this library (or a server
@@ -274,7 +320,7 @@ function remoteCatalog() {
       if(songs.has(song)) { stats.duplicates++; continue; }
       ownSongs.add(song);
       const artistId=hash(`artist\0${item.albumArtist}`), existing=albums.get(albumKey(item));
-      let track={...item,id:linkedId(peer,row.remote_id),artistId,genreIds:item.genres.map(name=>hash(`genre\0${name}`)),remote:{peer,name:row.name,id:row.remote_id,artistId,albumTag:imageTag||'front-v3',artistTag:artistImageTag||'artist-v3'}};
+      let track={...item,id:linkedId(peer,row.remote_id),artistId,genreIds:item.genres.map(name=>hash(`genre\0${name}`)),remote:{peer,name:row.name,id:row.remote_id,artistId,albumTag:imageTag||'front-v4',artistTag:artistImageTag||'artist-v3'}};
       // A track joining an album here shows this library's cover for it.
       if(existing) { track={...track,albumId:existing.albumId,album:existing.album,albumArtist:existing.albumArtist,artistId:existing.artistId}; track.remote.albumTag=existing.remote?.albumTag; if(!existing.remote) stats.merged++; }
       else { track.albumId=linkedId(peer,item.albumId); next.albums.set(track.albumId,{peer,id:item.albumId,tag:track.remote.albumTag}); if(!ownAlbums.has(albumKey(item))) ownAlbums.set(albumKey(item),track); }
@@ -330,7 +376,7 @@ export function linkedArtist(id) {
   return owner ? {peer:owner.remote.peer,id:owner.remote.artistId,tag:owner.remote.artistTag} : null;
 }
 // Artwork versions for linked items follow their server's, so app caches refresh.
-const albumTag=item=>artworkTag(item.albumId,item.remote?.albumTag?'linked-'+item.remote.albumTag:'front-v3');
+const albumTag=item=>artworkTag(item.albumId,item.remote?.albumTag?'linked-'+item.remote.albumTag:'front-v4');
 function browsingCatalog() { return cached('browsing',()=>localBrowsing().concat(remoteCatalog().tracks)); }
 // File type families for the library filter (the app's format badges match).
 export const formatFamilies = ['flac','dsd','mp3','alac','aac','pcm'];
@@ -358,7 +404,7 @@ export function sharedTracks() {
   return localAlbumTracks(null).map(item=>({id:item.id,title:item.title,artist:item.artist,albumArtist:item.albumArtist,album:item.album,albumId:item.albumId,genres:item.genres,durationMs:item.durationMs,
     number:item.number,disc:item.disc,year:item.year,format:item.format,dsd:item.dsd===true,...(item.segment?{segment:item.segment}:{}),
     // Artwork versions: a cover or photo found later changes them, so linked servers refresh it.
-    imageTag:artworkTag(item.albumId,'front-v3'),artistImageTag:artworkTag(item.artistId,'artist-v3')}));
+    imageTag:artworkTag(item.albumId,'front-v4'),artistImageTag:artworkTag(item.artistId,'artist-v3')}));
 }
 export const catalogHas=id=>Boolean(getTrack(id)) || browsingCatalog().some(item=>item.albumId===id || item.artistId===id || item.genreIds.includes(id));
 // 'full': the original files (album images, never their split copies).
@@ -405,7 +451,7 @@ export function getTrack(id) {
   const cue=db.prepare('SELECT * FROM cue_tracks WHERE id=?').get(id);
   if(!cue) return remoteCatalog().byId.get(id) || null;
   row=db.prepare('SELECT * FROM tracks WHERE id=?').get(cue.source_id);
-  if(row) return applyArtistAlias({...decodeMetadata(cue.metadata),path:row.path,size:row.size,mtime:row.mtime});
+  if(row) return discForm(applyArtistAlias({...decodeMetadata(cue.metadata),path:row.path,size:row.size,mtime:row.mtime}));
   return remoteCatalog().byId.get(id) || null;
 }
 // Every track as the apps see it, without per-device favorites (page() adds them).
@@ -460,7 +506,9 @@ let scanRequest = getSetting('scan.request');
 setInterval(() => { const next = getSetting('scan.request'); if (next !== scanRequest) { scanRequest = next; cueRead.clear(); void scanLibrary(); } }, 2000).unref();
 async function renderArtwork(id, portraitOnly=false) {
   const tracks=browsingCatalog();
-  const track=tracks.find(item=>!item.remote && (item.id===id || item.albumId===id || item.artistId===id || item.genreIds.includes(id))) || getTrack(id);
+  // A multi-disc album's cover comes from its first disc (or the album folder).
+  let track=tracks.find(item=>!item.remote && (item.id===id || item.albumId===id || item.artistId===id || item.genreIds.includes(id))) || getTrack(id);
+  if(track?.albumId===id && track.disc>1) track=tracks.filter(item=>!item.remote && item.albumId===id).reduce((best,item)=>(item.disc||1)<(best.disc||1) ? item : best,track);
   if(!track || track.remote) return null;
   const artist=id===track.artistId;
   const source=await musicPath(track.splitSource || track.path), folder=path.dirname(source);
@@ -480,22 +528,24 @@ async function renderArtwork(id, portraitOnly=false) {
   }
   if(artist && portraitOnly && !selected) return null;
   if(!selected) {
-    const cover=pick(entries,[/^front\.(jpg|jpeg|png|webp)$/i,/^cover\.(jpg|jpeg|png|webp)$/i,/^folder\.(jpg|jpeg|png|webp)$/i,/^(album|albumart|cover[ _-]?front)\.(jpg|jpeg|png|webp)$/i]);
-    if(cover) selected=await musicPath(path.relative(config.music,path.join(folder,cover)));
-    if(!selected) for(const subfolder of entries.filter(name=>/^(covers?|artwork|scans?)$/i.test(name))) {
-      const location=path.join(folder,subfolder);
-      let names; try { names=await readdir(location); } catch { continue; }
-      const front=pick(names,[/^(front|cover|folder)\.(jpg|jpeg|png|webp)$/i,/(^|[ _.-])front([ _.-].*)?\.(jpg|jpeg|png|webp)$/i]);
-      if(front) { selected=await musicPath(path.relative(config.music,path.join(location,front))); break; }
-    }
-    if(!selected && /^(cd|disc|disk)[ ._-]*\d+$/i.test(path.basename(folder))) {
-      const parent=path.dirname(folder), names=await readdir(parent);
-      const cover=pick(names,[/^front\.(jpg|jpeg|png|webp)$/i,/^cover\.(jpg|jpeg|png|webp)$/i,/^folder\.(jpg|jpeg|png|webp)$/i]);
-      if(cover) selected=await musicPath(path.relative(config.music,path.join(parent,cover)));
+    // The disc's own folder first, then its album's folder: a front picture,
+    // then one in an artwork subfolder (Covers, Artwork, Scans, Сканы (Russia)…).
+    const folders=[folder]; if(discFolder(path.basename(folder))) folders.push(path.dirname(folder));
+    for(const location of folders) {
+      let names; try { names=location===folder ? entries : await readdir(location); } catch { continue; }
+      const cover=pick(names,[/^front\.(jpg|jpeg|png|webp)$/i,/^cover\.(jpg|jpeg|png|webp)$/i,/^folder\.(jpg|jpeg|png|webp)$/i,/^(album|albumart|cover[ _-]?front)\.(jpg|jpeg|png|webp)$/i]);
+      if(cover) { selected=await musicPath(path.relative(config.music,path.join(location,cover))); break; }
+      for(const subfolder of names.filter(name=>/^(covers?|artwork|art|scans?|images?|booklet|сканы|обложк[аи])(?=$|[\s(\[_.-])/iu.test(name))) {
+        const inner=path.join(location,subfolder);
+        let files; try { files=await readdir(inner); } catch { continue; }
+        const front=pick(files,[/^(front|cover|folder)\.(jpg|jpeg|png|webp)$/i,/(^|[ _.-])front([ _.-].*)?\.(jpg|jpeg|png|webp)$/i,/^cover([ _.-].*)?\.(jpg|jpeg|png|webp)$/i]);
+        if(front) { selected=await musicPath(path.relative(config.music,path.join(inner,front))); break; }
+      }
+      if(selected) break;
     }
   }
   const info=await stat(selected||source);
-  const image=path.join(cacheDir,`${id}-${hash(`${selected||source}:${info.size}:${info.mtimeMs}:front-v3`).slice(0,16)}.jpg`);
+  const image=path.join(cacheDir,`${id}-${hash(`${selected||source}:${info.size}:${info.mtimeMs}:front-v4`).slice(0,16)}.jpg`);
   try { await stat(image); return image; } catch {}
   // A typical open CD sleeve is back (left) + front (right). Select the entire front,
   // then fit it within the square instead of taking the middle of the spread.
