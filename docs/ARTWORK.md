@@ -10,7 +10,8 @@ audio delivery path. Atomic writes, per-image job coalescing, at most two artwor
 jobs and one codec thread per job bound background resource consumption. Covers
 already rendered or fetched by curation are reused. A bounded in-memory lookup
 avoids repeating folder/audio metadata work for each image request within five
-minutes; artwork version and completed scan changes invalidate that lookup.
+minutes; artwork version and library revision changes (not a scan that found
+nothing new) invalidate that lookup and start the list warm-up again.
 
 Derivatives persist in `/data/cache/thumbnails-v1`. Every ten minutes a separate
 cleanup targets 256 MiB, keeping in-flight and newly written (under one hour)

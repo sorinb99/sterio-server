@@ -348,7 +348,9 @@ async function streamGrowing(req, res, state, destination) {
         const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, available - position), position);
         if (!bytesRead) { res.destroy(); return; }
         position += bytesRead;
-        if (!res.write(Buffer.from(buffer.subarray(0, bytesRead)))) await new Promise(resolve => { res.once('drain', resolve); res.once('close', resolve); });
+        // Both listeners go once either fires: a long stream waits on drain many
+        // times, and leftover close listeners piled up (MaxListenersExceeded).
+        if (!res.write(Buffer.from(buffer.subarray(0, bytesRead)))) await new Promise(resolve => { const done = () => { res.off('drain', done); res.off('close', done); resolve(); }; res.once('drain', done); res.once('close', done); });
         continue;
       }
       if (state.failed) { res.destroy(); return; }
@@ -436,7 +438,9 @@ async function streamLive(req, res, state) {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
       if (bytesRead) {
         position += bytesRead;
-        if (!res.write(Buffer.from(buffer.subarray(0, bytesRead)))) await new Promise(resolve => { res.once('drain', resolve); res.once('close', resolve); });
+        // Both listeners go once either fires: a long stream waits on drain many
+        // times, and leftover close listeners piled up (MaxListenersExceeded).
+        if (!res.write(Buffer.from(buffer.subarray(0, bytesRead)))) await new Promise(resolve => { const done = () => { res.off('drain', done); res.off('close', done); resolve(); }; res.once('drain', done); res.once('close', done); });
         continue;
       }
       if (state.failed) { res.destroy(); return; }

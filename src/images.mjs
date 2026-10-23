@@ -3,7 +3,7 @@ import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { hash } from './db.mjs';
-import { albumViews, artworkPath, cacheDir, groupViews, linkedArtwork, processFile, scanStatus } from './library.mjs';
+import { albumViews, artworkPath, cacheDir, groupViews, libraryRevision, linkedArtwork, processFile, scanStatus } from './library.mjs';
 import { artworkTag, canonicalArtist } from './library-state.mjs';
 import { HttpError } from './auth.mjs';
 
@@ -29,7 +29,7 @@ function remember(key, value) {
 // (linked servers ask for it to decide whose artist photo to show).
 export async function thumbnailPath(id, requestedWidth, {portraitOnly = false} = {}) {
   const width = imageWidth(requestedWidth), canonical = canonicalArtist(id, '').id;
-  const key = canonical + ':' + width + ':' + portraitOnly + ':' + artworkTag(canonical, 'front-v3') + ':' + scanStatus.lastFinished;
+  const key = canonical + ':' + width + ':' + portraitOnly + ':' + artworkTag(canonical, 'front-v3') + ':' + libraryRevision();
   const saved = recent.get(key);
   if (saved && Date.now() - saved.at < 300000) {
     if (!saved.file) return null;
@@ -116,14 +116,15 @@ async function pruneThumbnails() {
 }
 setInterval(() => {void pruneThumbnails().catch(() => {});}, 600000).unref();
 
-// After each scan the covers apps show in lists and shelves are resized ahead
-// of time, one at a time and only while no app is waiting for artwork, so a
-// page opens with its images ready instead of waiting on ffmpeg.
+// After a scan that changed the library the covers apps show in lists and
+// shelves are resized ahead of time, one at a time and only while no app is
+// waiting for artwork, so a page opens with its images ready instead of
+// waiting on ffmpeg. A scan that found nothing new leaves them be.
 let warmedFor = null, warming = false;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function warmThumbnails() {
-  if (warming || scanStatus.running || !scanStatus.lastFinished || warmedFor === scanStatus.lastFinished) return;
-  warming = true; warmedFor = scanStatus.lastFinished;
+  if (warming || scanStatus.running || !scanStatus.lastFinished || warmedFor === libraryRevision()) return;
+  warming = true; warmedFor = libraryRevision();
   const started = Date.now(); let made = 0;
   try {
     const jobs = [...albumViews().filter(album => !linkedArtwork(album.ref.itemId)).map(album => [album.ref.itemId, [256, 384]]), ...groupViews('artists').map(artist => [artist.ref.itemId, [128, 256]])];

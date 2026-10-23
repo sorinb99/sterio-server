@@ -15,6 +15,12 @@ await mkdir(cacheDir, { recursive: true });
 let version = 0, catalogVersion = -1, catalog = [];
 export const scanStatus = { running: false, scanned: 0, indexed: 0, errors: 0, lastFinished: null };
 let pendingScan = false;
+// CUE files read by an earlier scan of this run (path -> size:mtime, and
+// whether it was skipped, so the error count stays the same). A scan
+// that indexed no audio change rereads only the CUE files that changed, so
+// the scan every 15 minutes rewrites nothing and the library stays the same
+// revision (apps and artwork have nothing to redo).
+const cueRead = new Map();
 export function processFile(command, args, timeout = 30000, maxOutput = 4 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore','pipe','pipe'] });
@@ -115,7 +121,7 @@ export async function scanLibrary() {
   const seen = new Set(), cueFiles=[], splitFolders=[]; let complete = true;
   const old = new Map(db.prepare('SELECT id,size,mtime FROM tracks').all().map(row => [row.id,row]));
   const insert = db.prepare('INSERT INTO tracks VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,size=excluded.size,mtime=excluded.mtime,metadata=excluded.metadata');
-  let publishedAt = Date.now(), unpublished = false;
+  let publishedAt = Date.now(), unpublished = false, audioChanged = false;
   async function walk(folder) {
     let entries;
     try { entries = await readdir(path.join(config.music, folder), { withFileTypes: true }); }
@@ -133,7 +139,7 @@ export async function scanLibrary() {
         const previous = old.get(id);
         if (previous && previous.size === info.size && previous.mtime === info.mtimeMs) continue;
         const item = await metadata(relative);
-        insert.run(item.id, relative, info.size, info.mtimeMs, JSON.stringify(item));
+        insert.run(item.id, relative, info.size, info.mtimeMs, JSON.stringify(item)); audioChanged = true;
         // New files show up every few seconds during a large scan; a revision per
         // file would make every app request rebuild the whole library meanwhile.
         if (Date.now() - publishedAt >= 5000) { version++; publishedAt = Date.now(); } else unpublished = true;
@@ -145,21 +151,29 @@ export async function scanLibrary() {
   try {
     await walk('');
     if (unpublished) version++;
-    if (complete) for (const id of old.keys()) if (!seen.has(id)) { db.prepare('DELETE FROM tracks WHERE id=?').run(id); version++; }
+    if (complete) for (const id of old.keys()) if (!seen.has(id)) { db.prepare('DELETE FROM tracks WHERE id=?').run(id); version++; audioChanged = true; }
     reconcileAlbumTags();
     const sources=new Map(getCatalog().map(item=>[path.normalize(item.path).toLowerCase(),item]));
     const cueInsert=db.prepare('INSERT OR REPLACE INTO cue_tracks VALUES (?,?,?,?)');
     for(const relative of cueFiles.sort()) {
+      const cueInfo=await stat(await musicPath(relative)).catch(() => null), cueKey=cueInfo ? `${cueInfo.size}:${cueInfo.mtimeMs}` : '';
+      const known=cueRead.get(relative);
+      if(!audioChanged && cueKey && known?.key===cueKey) { if(known.failed) scanStatus.errors++; continue; }
+      const read={key:cueKey,failed:false}; cueRead.set(relative,read);
       try {
         const items=await readCue(await musicPath(relative),relative,sources,hash);
         db.exec('BEGIN IMMEDIATE');
         try { db.prepare('DELETE FROM cue_tracks WHERE cue_path=?').run(relative); for(const item of items) cueInsert.run(item.id,relative,item.sourceId,JSON.stringify(item)); db.exec('COMMIT'); version++; }
         catch(error) { db.exec('ROLLBACK'); throw error; }
-      } catch(error) { db.prepare('DELETE FROM cue_tracks WHERE cue_path=?').run(relative); version++; scanStatus.errors++; console.warn(`CUE skipped: ${relative}: ${error.message}`); }
+      } catch(error) { read.failed=true; db.prepare('DELETE FROM cue_tracks WHERE cue_path=?').run(relative); version++; scanStatus.errors++; console.warn(`CUE skipped: ${relative}: ${error.message}`); }
     }
     const splitInsert=db.prepare('INSERT OR REPLACE INTO split_sets VALUES (?,?,?)');
     for(const folder of splitFolders) {
-      try { const marker=JSON.parse(await readFile(path.join(await musicPath(folder),SPLIT_MARKER),'utf8')); splitInsert.run(folder,String(marker.source),JSON.stringify(marker)); version++; }
+      try {
+        const marker=JSON.parse(await readFile(path.join(await musicPath(folder),SPLIT_MARKER),'utf8')), saved=db.prepare('SELECT source_path,metadata FROM split_sets WHERE folder=?').get(folder);
+        if(saved?.source_path===String(marker.source) && saved.metadata===JSON.stringify(marker)) continue;
+        splitInsert.run(folder,String(marker.source),JSON.stringify(marker)); version++;
+      }
       catch(error) { db.prepare('DELETE FROM split_sets WHERE folder=?').run(folder); version++; console.warn(`Split folder skipped: ${folder}: ${error.message}`); }
     }
     if(complete) {
@@ -424,7 +438,7 @@ export function page(items, query, favoriteIds) {
   return { items: result.slice(start, start + limit).map(({artistId,genreIds,...item}) => ({ ...item, favorite: favoriteIds.has(item.ref.itemId) })), total };
 }
 let scanRequest = getSetting('scan.request');
-setInterval(() => { const next = getSetting('scan.request'); if (next !== scanRequest) { scanRequest = next; void scanLibrary(); } }, 2000).unref();
+setInterval(() => { const next = getSetting('scan.request'); if (next !== scanRequest) { scanRequest = next; cueRead.clear(); void scanLibrary(); } }, 2000).unref();
 async function renderArtwork(id, portraitOnly=false) {
   const tracks=browsingCatalog();
   const track=tracks.find(item=>!item.remote && (item.id===id || item.albumId===id || item.artistId===id || item.genreIds.includes(id))) || getTrack(id);

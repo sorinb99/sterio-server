@@ -10,7 +10,7 @@ export async function readCue(file, relative, sources, hash) {
   else if(bytes[0]===0xfe && bytes[1]===0xff) text=new TextDecoder('utf-16be').decode(bytes);
   else { try { text=new TextDecoder('utf-8',{fatal:true}).decode(bytes); } catch { text=new TextDecoder('windows-1252').decode(bytes); } }
   let filename=null, current=null;
-  const album={}; const tracks=[];
+  const album={}; let tracks=[];
   const value=s => (s.startsWith('"') && s.endsWith('"')?s.slice(1,-1):s).trim().slice(0,512);
   for(const raw of text.replace(/^\uFEFF/,'').split(/\r?\n/)) {
     const line=raw.trim(); let match;
@@ -23,7 +23,13 @@ export async function readCue(file, relative, sources, hash) {
       current.start=(minutes*60+seconds+frames/75); current.file=filename;
     }
   }
-  if(tracks.length<2 || tracks.length>1000) return [];
+  if(tracks.length>1000) return [];
+  // A CUE beside one file per track (EAC's multi-file layout) adds nothing: each
+  // file already is its track and plays as it is. Only files holding several
+  // tracks are images cut into chapters.
+  const perFile=new Map(); for(const track of tracks) perFile.set(track.file,(perFile.get(track.file)||0)+1);
+  tracks=tracks.filter(track=>perFile.get(track.file)>1);
+  if(tracks.length<2) return [];
   const result=[]; const lastByFile=new Map(); const numbers=new Set();
   for(const track of tracks) {
     if(!track.file || !Number.isFinite(track.start) || !Number.isInteger(track.number) || track.number<=0 || numbers.has(track.number)) throw new Error('Incomplete or duplicate CUE track');

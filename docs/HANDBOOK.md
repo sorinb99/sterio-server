@@ -35,7 +35,7 @@ Two ways to run it, same code:
 | `DATA_DIR` | `/data` | Database, keys, artwork, cache |
 | `PORT` / `ADMIN_PORT` | 7766 / 7767 | App API / local admin dashboard |
 | `SERVER_NAME` | `Sterio NAS` | Name shown in the apps |
-| `SCAN_INTERVAL_SECONDS` | 900 | Library rescan interval |
+| `SCAN_INTERVAL_SECONDS` | 900 | Library rescan interval. A scan with no audio change rereads only CUE sheets and split markers that changed (`cueRead`, in memory; a dashboard rescan rereads all), so an idle library keeps its revision and the thumbnail warm-up (keyed on `libraryRevision()`) does not run again |
 | `MAX_PCM_RATE` | 192000 | Highest PCM rate of conversions |
 | `CACHE_MAX_MB` | 4096 in code, 20480 in `compose.yaml` | Conversion cache size (NAS `.env` currently sets 4096) |
 | `CACHE_MAX_DAYS` | 30 | Conversions unused this long are deleted |
@@ -75,7 +75,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | `requests.mjs` | Connection requests (in memory) accepted on the dashboard or in the app; `requestListeners` tell `socket.mjs`, which pushes the new list to admin devices; `connectView` adds `connectionRequests` for admins so the apps can notify |
 | `library.mjs` | Scan, metadata (ffprobe), CUE chapters, split folders, views (albums, artists, genres), `favorites()` per profile. `getTrack(id)` returns a file in its library form (`browsingForm`): a split track carries the image's album id, name, artist and cover, so now playing, playlists, Play on and streamers show the right artwork |
 | `library-state.mjs` | Artist aliases (merges) and chosen artwork, kept in memory |
-| `cue.mjs` | CUE parsing (metadata only) |
+| `cue.mjs` | CUE parsing (metadata only). Only files holding several tracks become chapters: a CUE beside one file per track adds nothing and its files play as they are |
 | `split.mjs` | Writes CUE chapters as FLAC files in a hidden `.sterio-tracks` folder with a `.sterio-split.json` marker; chapters encoded in parallel (`SPLIT_WORKERS`), two albums in flight |
 | `media.mjs`, `delivery.mjs` | Streaming with Range, conversions (ffmpeg), conversion cache and pruning. `resolveDelivery` picks original / lossless repack / PCM conversion / CUE; lossless repack (FLAC, frame size 4096) covers FLAC with frames Apple can't decode and ALAC for apps that send `alacDecoder:false` (Android) |
 | `delivery.mjs`, `verbatim.mjs` | Live delivery while converting: FLAC with VERBATIM frames, layout fixed in advance so players can seek a file still being written |
@@ -109,7 +109,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 - Version: `package.json`, `compose.yaml` (`image:`) and `src/index.mjs`
   (`/v1/info`) — change all three together. Same rules as the app
   (`../sterio/docs/VERSIONING.md`): PATCH for fixes, MINOR for a feature or a
-  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62.
+  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.1 is the current version.
 - Docker image (built on this Mac for the NAS):
   `docker buildx build --platform linux/amd64 -t sterio-server:$V --load . && docker save sterio-server:$V | gzip > work/sterio-server-$V-linux-amd64.tar.gz`.
   The deliverable `builds/Sterio-Server-Docker-$V.zip` holds `compose.yaml`,
@@ -123,7 +123,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 - Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` archives, signs
   and exports a pkg into `work/mac-server/`; upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
-  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9).
+  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9), 0.2.1 (10).
 - TestFlight via the App Store Connect API: key `62BSTYTAWV` (App Manager) in
   `~/.appstoreconnect/private_keys/` (never read or print it).
   `node work/testflight-expire.mjs` lists the app's 1.x and the server's 0.1.x
