@@ -3,6 +3,15 @@
   "version": "0.2.1",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
-  "scripts": { "start": "node src/index.mjs", "admin": "node src/cli.mjs" }
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "admin": "node src/cli.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10",
+    "javascript-obfuscator": "^4.1.1"
+  }
 }

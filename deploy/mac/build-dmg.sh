@@ -85,8 +85,11 @@ lipo -create "$work/tools/node-v$node_version-darwin-arm64/bin/node" "$work/tool
 for tool in ffmpeg ffprobe; do lipo -create "$work/tools/$tool-arm64/$tool" "$work/tools/$tool-x64/$tool" -output "$bin/$tool"; done
 cp "$flac_build/src/metaflac/metaflac" "$bin/metaflac"
 chmod 755 "$bin"/*
-cp -R "$root/src" "$app/Contents/Resources/server/src"
-cp "$root/package.json" "$app/Contents/Resources/server/package.json"
+# Protected build: bundled, obfuscated server (no source files in the app).
+( cd "$root" && [ -d node_modules/esbuild ] || npm install --no-audit --no-fund >/dev/null )
+( cd "$root" && node scripts/build.mjs )
+cp -R "$root/build/src" "$app/Contents/Resources/server/src"
+cp "$root/build/package.json" "$app/Contents/Resources/server/package.json"
 # Trusted certificates for FFmpeg reading a linked server over HTTPS.
 cp /etc/ssl/cert.pem "$app/Contents/Resources/server/cacert.pem"
 # The Sterio mark for the menu bar (a template image).

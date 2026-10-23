@@ -8,3 +8,4 @@
 /work/
 node_modules/
 *.log
+/build/

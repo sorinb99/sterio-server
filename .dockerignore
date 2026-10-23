@@ -2,3 +2,5 @@
 !package.json
 !src/
 !src/**
+!scripts/
+!scripts/**

@@ -546,6 +546,11 @@ The Sterio logo is now the ribbon S, on the dashboard (and as its browser icon) 
 
 Same code as 0.1.62. From here on the server follows the app's rules: PATCH for fixes, MINOR for a new feature or API, 1.0 with the public release.
 
+### 0.2.1: faster idle, protected build
+
+The server now ships as a bundled, obfuscated build with no readable source in
+the Docker image or the Mac app. Behaviour is unchanged.
+
 ### 0.2.1: less work while idle and while you listen
 
 - Albums ripped as one file per track with a CUE sheet beside them (EAC's multi-file layout) play their files directly. Before, each file was treated as a chapter of an image and cut from itself, a full re-encode on first play. Such tracks saved earlier as favorites or in playlists are listed under the files' own ids, so add them again.

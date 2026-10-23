@@ -110,18 +110,34 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
   (`/v1/info`) — change all three together. Same rules as the app
   (`../sterio/docs/VERSIONING.md`): PATCH for fixes, MINOR for a feature or a
   new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.1 is the current version.
-- Docker image (built on this Mac for the NAS):
+- **Protected build (`scripts/build.mjs`).** The shipped server never contains
+  source. `node scripts/build.mjs` bundles `src/` with esbuild (ESM, split
+  chunks, `packages: 'external'` so Node built-ins stay) and obfuscates every
+  `.mjs` with javascript-obfuscator (hex names, base64 string array; control
+  flow left intact so the stream and scan loops keep their speed), into
+  `build/` — `build/src/*.mjs` (`index`, `cli`, `discovery-worker`,
+  `healthcheck`, `chunks/`), `build/src/admin/` (minified dashboard) and a
+  trimmed `build/package.json`. The same relative layout as `src/`, so paths
+  the code opens (`../package.json`, `./admin/`, `../cacert.pem`,
+  `./discovery-worker.mjs`) still resolve. `build/` is git-ignored. Edit and
+  run from `src/`; `build/` is only for the Docker image and the Mac app.
+- Docker: a two-stage `Dockerfile`. The build stage runs `scripts/build.mjs`;
+  the runtime stage copies only `build/` (plus ffmpeg, flac), so the image has
+  no source, no npm, no shell scripts of ours. `HEALTHCHECK` runs
+  `node src/healthcheck.mjs`. Build the deliverable image on this Mac:
   `docker buildx build --platform linux/amd64 -t sterio-server:$V --load . && docker save sterio-server:$V | gzip > work/sterio-server-$V-linux-amd64.tar.gz`.
   The deliverable `builds/Sterio-Server-Docker-$V.zip` holds `compose.yaml`,
   `README.txt` and the tar.gz.
 - NAS deploy (`sorinb99@192.168.50.90`, `/volume1/docker/sterio-server`,
   data `/volume1/docker/sterio-server/data`, music `/volume2/data/media/music`).
   Run `work/deploy-nas.sh` (allowed for the agent since 2026-10-21; it
-  copies `src`, `package.json`, `compose.yaml`, runs
-  `docker compose up -d --build` and prints the last log lines). Deploy after
-  every server change. Any other change on the NAS still goes through the user.
-- Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` archives, signs
-  and exports a pkg into `work/mac-server/`; upload with
+  sends `src`, `scripts`, `package.json`, `compose.yaml`, `Dockerfile` and
+  `.dockerignore`, then `docker compose up -d --build` — the build stage on
+  the NAS obfuscates the code, so the running image there has no source
+  either — and prints the last log lines). Deploy after every server change. Any other change on the NAS still goes through the user.
+- Mac app: `APP_BUILD=<n> deploy/mac/build-dmg.sh --app-store` runs the
+  protected build, then archives, signs and exports a pkg into
+  `work/mac-server/` (the app bundles `build/src`, not `src`); upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
   Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9), 0.2.1 (10).
 - TestFlight via the App Store Connect API: key `62BSTYTAWV` (App Manager) in
