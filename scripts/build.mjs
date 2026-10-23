@@ -2,7 +2,9 @@
 // (no source files, no comments, no readable names) beside the admin page and
 // package.json. The Docker image and the Mac app ship build/, never src/.
 // Paths the code opens relative to itself (../package.json, ./admin/,
-// ../cacert.pem, ./discovery-worker.mjs) keep the same layout.
+// ../cacert.pem, ./discovery-worker.mjs) keep the same layout, so shared
+// chunks sit beside the entries in build/src: in a subfolder, code moved into
+// a chunk looked one folder too deep (Home failed: no discovery worker).
 import { build } from 'esbuild';
 import JavaScriptObfuscator from 'javascript-obfuscator';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -12,7 +14,7 @@ await rm(out, { recursive: true, force: true });
 await build({
   absWorkingDir: root,
   entryPoints: ['src/index.mjs', 'src/cli.mjs', 'src/discovery-worker.mjs', 'src/healthcheck.mjs'],
-  outdir: 'build/src', outExtension: { '.js': '.mjs' }, chunkNames: 'chunks/[hash]',
+  outdir: 'build/src', outExtension: { '.js': '.mjs' }, chunkNames: 'chunk-[hash]',
   bundle: true, splitting: true, format: 'esm', platform: 'node', target: 'node24',
   minify: true, legalComments: 'none', packages: 'external', logLevel: 'warning',
 });

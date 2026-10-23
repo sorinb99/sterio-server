@@ -546,6 +546,12 @@ The Sterio logo is now the ribbon S, on the dashboard (and as its browser icon) 
 
 Same code as 0.1.62. From here on the server follows the app's rules: PATCH for fixes, MINOR for a new feature or API, 1.0 with the public release.
 
+### 0.2.2: Home works again in the protected build
+
+The protected build of 0.2.1 placed shared code one folder too deep, so the
+Home mixes failed with "The server could not complete this request" and the
+apps showed saved mixes. Shared code now sits beside the server's entry files.
+
 ### 0.2.1: faster idle, protected build
 
 The server now ships as a bundled, obfuscated build with no readable source in
