@@ -14,7 +14,7 @@ The app is the sibling project `../sterio`, with its own `docs/HANDBOOK.md`.
 A Node.js (24, no framework, no npm dependencies) music server for the Sterio
 apps. It indexes a music folder (FLAC, DSD, CUE images, MP3/AAC/ALAC/WAV/AIFF),
 streams originals bit-perfect, converts only when asked (DSD → PCM FLAC, CUE
-chapters), plays network streamers (BluOS, UPnP/DLNA), relays "Play on"
+chapters), plays network streamers (BluOS, UPnP/DLNA, Google Cast), relays "Play on"
 between a listener's devices, keeps playlists, profiles, favorites and
 listening history, builds Home mixes and links to other Sterio servers.
 
@@ -84,9 +84,9 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | `discovery.mjs` (+ `discovery-worker.mjs`) | Home data per profile, built in a worker thread |
 | `profiles.mjs` | Listener profiles: created on first use (devices paired for Play on share one), link codes, join, leave; `profileOf`, `profileDevices`, `sameProfile` |
 | `playlists.mjs` | Playlists owned by a profile, shares (read-only) to other profiles |
-| `connect.mjs` | Play on: presence from pulses, device list (all related devices, Macs and phones), command queue (`toggle`, `pause`, `next`, `previous`, `seek`, `play` with track ids, index, optional `position` and `paused`; each delivered command carries its `sender`), pairing (codes and discoverable Mac), `related(a,b)` = same control group or same profile |
+| `connect.mjs` | Play on: presence from pulses, device list (all related devices, Macs and phones), command queue (`toggle`, `pause`, `next`, `previous`, `seek`, `play` with track ids, index, optional `position` and `paused`; each delivered command carries its `sender`), pairing (codes and discoverable Mac), `related(a,b)` = same control group or same profile. A pulse may carry `state.signal`, the playing device's Signal Path (intro, up to 10 stages, bit-perfect verdict, rate warning; text only, bounded by `signalPath()`); the devices that control it show it |
 | `socket.mjs` | WebSocket for Play on: pulses, commands, pushes every device's change to related devices |
-| `renderers.mjs` | Network streamers: SSDP/BluOS discovery, UPnP AVTransport, the server's own queue per streamer, polled every second while playing and every 10 s while paused. DSD is sent natively only when the renderer's `GetProtocolInfo` sink lists a DSD MIME, else as PCM FLAC |
+| `renderers.mjs` | Network streamers: SSDP/BluOS discovery, UPnP AVTransport, the server's own queue per streamer, polled every second while playing and every 10 s while paused. DSD is sent natively only when the renderer's `GetProtocolInfo` sink lists a DSD MIME, else as PCM FLAC. Google Cast (`cast.mjs`, kind `cast`): Cast v2 over TLS on port 8009 (self-signed certificates, LAN only), Google's Default Media Receiver (`CC1AD845`) gets the same stream URL as a UPnP renderer, with title, artist, album and cover; one connection per device, heartbeat every 5 s, closed after 5 idle minutes. Name and model from `/setup/eureka_info` (port 8008, else 8443). The network search also tries port 8009 on the /24 (mDNS does not cross the Docker bridge); a speaker that also answers as UPnP or BluOS is listed only as that. Not gapless; no DSD (sent as PCM FLAC); Cast receivers generally play up to 24/96, so higher rates may not start |
 | `peers.mjs` | Linked servers (one server reads another's shared index) |
 | `reporting.mjs` | Listening history, device nicknames |
 | `admin.mjs`, `admin/index.html`, `app-admin.mjs` | LAN dashboard and admin from the app |

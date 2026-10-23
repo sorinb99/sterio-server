@@ -221,7 +221,7 @@ async function refreshRenderers(){
   const result=await api('renderers');
   $('renderer-list').replaceChildren(...result.items.map(renderer=>{
     const item=el('div',undefined,'suggestion'),info=el('div'),session=renderer.session;
-    const kind=renderer.kind==='bluos'?'BluOS':'UPnP'+(renderer.gapless?' · gapless':'');
+    const kind=renderer.kind==='bluos'?'BluOS':renderer.kind==='cast'?'Google Cast':'UPnP'+(renderer.gapless?' · gapless':'');
     const playing=session?.track?`${{playing:'Playing',paused:'Paused',buffering:'Loading',ended:'Finished',stopped:'Stopped',error:'Error'}[session.status]||session.status}: ${session.track.title} — ${session.track.artist}${session.duration?` · ${clock(session.position)} / ${clock(session.duration)}`:''}${session.controller?` · from ${session.controller}`:''}`:'Idle';
     info.append(el('strong',renderer.name),el('p',`${renderer.model||kind} · ${renderer.address} · ${kind}${renderer.dsd?' · DSD':''}`,'detail'),el('p',session?.error||playing,'detail'+(session?.error?' error':'')));
     if(!renderer.streamBase)info.append(el('p','Start playback from the app on the local network once, so the streamer knows this server\'s address.','detail'));
@@ -234,7 +234,7 @@ async function refreshRenderers(){
   if(!result.items.length)$('renderer-list').append(el('p','No streamers yet. Enter a streamer\'s IP address below.','detail'));
 }
 $('renderer-form').onsubmit=event=>{event.preventDefault();void toolAction(event.submitter,async()=>{await api('renderers/add',{address:$('renderer-address').value});$('renderer-address').value='';$('renderer-message').textContent='Streamer added.';await refreshRenderers();},'renderer-message');};
-$('renderer-discover').onclick=()=>toolAction($('renderer-discover'),async()=>{const result=await api('renderers/discover',{});$('renderer-message').textContent=result.items.length?`Found UPnP renderers at ${result.items.map(item=>item.address).join(', ')}. Add one by its IP address.`:'No new UPnP renderers answered (Docker networks often block this search; enter the IP address instead). BluOS players are added by IP address.';},'renderer-message');
+$('renderer-discover').onclick=()=>toolAction($('renderer-discover'),async()=>{const result=await api('renderers/discover',{});$('renderer-message').textContent=result.items.length?`Found streamers at ${result.items.map(item=>item.address).join(', ')}. Add one by its IP address.`:'No new streamers answered (Docker networks often block this search; enter the IP address instead). BluOS players are added by IP address.';},'renderer-message');
 
 // Sections as tabs; the address keeps the open tab (#devices), so reload and back work.
 const tabs=['home','activity','devices','library','servers'];

@@ -39,6 +39,16 @@ export function joinLink(device, input) {
   } catch(error) { db.exec('ROLLBACK'); throw error; }
   return {ok:true};
 }
+// The playing device's Signal Path, as it shows it, for the devices that
+// control it. Text only, bounded; never interpreted here.
+const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
+function signalPath(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.stages)) return null;
+  const stages = value.stages.slice(0, 10).filter(stage => stage && typeof stage === 'object').map(stage => ({
+    label:text(stage.label, 60), evidence:stage.evidence === 'Configured' ? 'Configured' : 'Reported', value:text(stage.value, 160), detail:text(stage.detail, 300),
+  })).filter(stage => stage.label);
+  return stages.length ? { intro:text(value.intro, 300), stages, bitPerfect:text(value.bitPerfect, 400), ...(value.rateWarning ? { rateWarning:text(value.rateWarning, 300) } : {}) } : null;
+}
 export function pulse(device, input) {
   const state = input.state || {};
   const trackIds = ids(state.trackIds || []);
@@ -46,7 +56,7 @@ export function pulse(device, input) {
   const status = ['idle','buffering','playing','paused','interrupted','ended','error'].includes(state.status) ? state.status : 'idle';
   if (presence.get(device.id)?.instance !== input.instance) commands.delete(device.id);
   presence.set(device.id, {instance:String(input.instance||'').slice(0,80),id:device.id, name:String(input.name || device.name).slice(0,80), platform:input.platform === 'macos' ? 'macos' : 'mobile', seen:Date.now(),
-    state:{trackIds,index,status,position:Math.max(0,Math.min(604800,Number(state.position)||0)),duration:Math.max(0,Math.min(604800,Number(state.duration)||0)),route:String(state.route || 'System output').slice(0,120),error:state.error ? String(state.error).slice(0,200) : null}});
+    state:{trackIds,index,status,position:Math.max(0,Math.min(604800,Number(state.position)||0)),duration:Math.max(0,Math.min(604800,Number(state.duration)||0)),route:String(state.route || 'System output').slice(0,120),error:state.error ? String(state.error).slice(0,200) : null,signal:signalPath(state.signal)}});
   observePulse(device,presence.get(device.id).state,input.platform === 'macos' ? 'macos' : 'mobile');
   const ack = new Set(Array.isArray(input.ack) ? input.ack.slice(0,32) : []);
   commands.set(device.id,(commands.get(device.id) || []).filter(item => !ack.has(item.id)));

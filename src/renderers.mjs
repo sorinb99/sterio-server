@@ -6,7 +6,8 @@ import { HttpError, limit, streamTicket } from './auth.mjs';
 import { getTrack, trackView } from './library.mjs';
 import { recordPlayback } from './reporting.mjs';
 import { prepareDelivery, resolveDelivery } from './delivery.mjs';
-// Network streamers (BluOS players, UPnP/DLNA renderers) play straight from
+import { cast, castName, castPortOpen } from './cast.mjs';
+// Network streamers (BluOS players, UPnP/DLNA renderers, Google Cast devices) play straight from
 // this server. The server keeps the queue and advances it, so the app is only
 // a remote: it can sleep or close while the streamer keeps playing.
 db.exec(`CREATE TABLE IF NOT EXISTS renderers (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', location TEXT NOT NULL, control TEXT NOT NULL DEFAULT '{}', stream_base TEXT NOT NULL, created INTEGER NOT NULL)`);
@@ -148,7 +149,7 @@ const upnp = {
     return { state, position:seconds(tag(position,'RelTime')), duration:seconds(tag(position,'TrackDuration')), volume:Number.isFinite(volume) ? volume : null, uri:tag(position,'TrackURI') || null };
   },
 };
-const drivers = { bluos, upnp };
+const drivers = { bluos, upnp, cast };
 const parse = row => row && { ...row, control:JSON.parse(row.control) };
 const rendererRow = id => parse(db.prepare('SELECT * FROM renderers WHERE id=?').get(id));
 // owner: the app device asking, or undefined for the admin.
@@ -211,8 +212,11 @@ export async function addRenderer(input, base, owner = '') {
   const address = String(input.address || '').trim();
   const host = address.replace(/^http:\/\//,'').replace(/[:/].*$/,'');
   if (!privateHost(host)) throw new HttpError(400,'Enter the streamer\'s local IP address, for example 192.168.1.50');
-  const found = (!/^http:\/\//.test(address) && await bluos.probe(host)) || await upnp.probe(/^http:\/\//.test(address) ? address : host);
-  if (!found) throw new HttpError(404,'No BluOS or UPnP streamer answered at this address');
+  // kind 'cast' (from a search) goes straight to Google Cast; a typed address
+  // tries BluOS, UPnP, then Cast.
+  const found = input.kind === 'cast' || /:8009$/.test(address) ? await cast.probe(host)
+    : (!/^http:\/\//.test(address) && await bluos.probe(host)) || await upnp.probe(/^http:\/\//.test(address) ? address : host) || (!/^http:\/\//.test(address) && await cast.probe(host));
+  if (!found) throw new HttpError(404,'No BluOS, UPnP or Google Cast streamer answered at this address');
   // The same streamer at a new address (a UPnP renderer takes a new port when
   // it restarts) updates the entry instead of adding a second one.
   const foundHost = new URL(found.location).hostname;
@@ -236,8 +240,9 @@ export async function removeRenderer(id, owner) {
   return { ok:true };
 }
 // Searches the server's /24 (from the address the app or admin used): BluOS on
-// port 11000 and a unicast SSDP search on port 1900 to every address, which
-// also works from a Docker bridge network, plus the usual multicast search.
+// port 11000, a unicast SSDP search on port 1900 to every address, which
+// also works from a Docker bridge network, plus the usual multicast search,
+// and Google Cast's port 8009 (mDNS does not cross a Docker bridge either).
 export async function discoverRenderers(subnet, owner) {
   const found = new Map(), players = [];
   // An app on the public address: use the LAN address streamers already use.
@@ -266,7 +271,11 @@ export async function discoverRenderers(subnet, owner) {
     });
     setTimeout(finish, 3500);
   });
-  await Promise.all([bluosScan, ssdp]);
+  const castHosts = [];
+  const castScan = (async () => {
+    for (let i = 0; i < hosts.length; i += 64) await Promise.all(hosts.slice(i, i + 64).map(async host => { if (await castPortOpen(host)) castHosts.push(host); }));
+  })();
+  await Promise.all([bluosScan, ssdp, castScan]);
   const known = new Set((owner === undefined ? db.prepare('SELECT location FROM renderers').all() : db.prepare('SELECT location FROM renderers WHERE owner=?').all(owner)).map(row => row.location));
   const upnpFound = [];
   for (const [location, address] of found) {
@@ -274,7 +283,10 @@ export async function discoverRenderers(subnet, owner) {
     const description = await request(location, { timeout:2000 }).catch(() => null);
     if (description?.status === 200 && /MediaRenderer/.test(description.text)) upnpFound.push({ address, location, name:tag(description.text,'friendlyName') || address, kind:'upnp' });
   }
-  return { items:[...players.filter(item => !known.has(item.location)), ...upnpFound] };
+  // A speaker with UPnP or BluOS as well is listed once, by those (gapless, DSD).
+  const taken = new Set([...players.map(item => item.address), ...upnpFound.map(item => item.address), ...[...found.values()]]);
+  const casts = await Promise.all(castHosts.filter(host => !taken.has(host) && !known.has(`http://${host}:8009`)).map(async host => ({ address:host, location:`http://${host}:8009`, name:(await castName(host)).name, kind:'cast' })));
+  return { items:[...players.filter(item => !known.has(item.location)), ...upnpFound, ...casts] };
 }
 function report(session, kind) {
   const trackId = session.queue[session.index];
