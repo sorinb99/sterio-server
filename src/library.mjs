@@ -271,29 +271,56 @@ export const withoutDisc=title=>title
   .replace(/[\s,]*(?:cd|disc|disk)[ ._-]*\d{1,2}(?=\s*[)\]])/gi,'')
   .replace(/[\s,:–-]*(?:cd|disc|disk)[ ._-]*\d{1,2}\s*$/i,'')
   .trim() || title.trim();
-function discPlace(item) {
+// Compilations and soundtracks without an ALBUMARTIST tag ("Eminem Presents:
+// The Re-Up", "8 Mile") would become one album per track artist: tracks in one
+// folder with one album title are one album. Its artist is the one the title
+// names, else the one with most tracks, else Various Artists.
+function albumPlace(item) {
+  if(item.remote) return null;
   const folder=path.dirname(item.splitSource || item.path || ''), found=discFolder(path.basename(folder));
-  if(!found || item.remote) return null;
+  if(!found) return {key:`${folder}\0${matchKey(item.album)}`,disc:item.disc||1};
   const album=path.dirname(folder);
-  const key=found.only ? `${album}\0${matchKey(item.albumArtist)}` : `${album}\0${matchKey(item.albumArtist)}\0${matchKey(withoutDisc(item.album))}`;
-  return {...found,key,disc:item.disc>1 ? item.disc : found.disc};
+  return {...found,key:found.only ? album : `${album}\0${matchKey(withoutDisc(item.album))}`,disc:item.disc>1 ? item.disc : found.disc};
 }
-// Each multi-disc album's ID and title, from its lowest disc.
-function discAlbums() {
-  return cached('discAlbums',()=>{
-    const albums=new Map();
+function albumArtistOf(title, counts) {
+  if(counts.size<2) return null;
+  const named=[...counts.keys()].filter(name=>matchKey(name) && ` ${matchKey(title)} `.includes(` ${matchKey(name)} `));
+  if(named.length) return named.sort((a,b)=>counts.get(b)-counts.get(a))[0];
+  const [first,second]=[...counts].sort((a,b)=>b[1]-a[1]);
+  return first[1]>second[1] ? first[0] : 'Various Artists';
+}
+// Each album's ID (its lowest disc's, the chosen artist's), title and artist.
+function albumGroups() {
+  return cached('albumGroups',()=>{
+    const groups=new Map();
     for(const item of getCatalog().map(browsingFormOf).concat(rawCueTracks())) {
-      const place=discPlace(item); if(!place) continue;
-      const known=albums.get(place.key);
-      if(!known || place.disc<known.disc || (place.disc===known.disc && item.albumId<known.albumId)) albums.set(place.key,{disc:place.disc,albumId:item.albumId,album:withoutDisc(item.album)});
+      const place=albumPlace(item); if(!place) continue;
+      let group=groups.get(place.key);
+      if(!group) groups.set(place.key,group={members:[],counts:new Map(),artists:new Set(),disc:Boolean(place.only!==undefined)});
+      group.members.push({disc:place.disc,albumId:item.albumId,album:item.album,albumArtist:item.albumArtist});
+      if(!group.artists.has(matchKey(item.albumArtist))) { group.artists.add(matchKey(item.albumArtist)); group.counts.set(item.albumArtist,0); }
+      const name=[...group.counts.keys()].find(value=>matchKey(value)===matchKey(item.albumArtist));
+      group.counts.set(name,group.counts.get(name)+1);
     }
-    return albums;
+    const result=new Map();
+    for(const [key,group] of groups) {
+      if(!group.disc && group.counts.size<2 && new Set(group.members.map(m=>m.albumId)).size<2) continue;
+      const lowest=Math.min(...group.members.map(m=>m.disc));
+      const first=group.members.filter(m=>m.disc===lowest);
+      const artist=albumArtistOf(withoutDisc(first[0].album),group.counts);
+      const own=first.filter(m=>artist && matchKey(m.albumArtist)===matchKey(artist));
+      const chosen=(own.length ? own : first).sort((a,b)=>a.albumId<b.albumId?-1:1)[0];
+      result.set(key,{albumId:chosen.albumId,album:group.disc ? withoutDisc(chosen.album) : chosen.album,albumArtist:artist});
+    }
+    return result;
   });
 }
 function discForm(item) {
-  const place=discPlace(item); if(!place) return item;
-  const album=discAlbums().get(place.key);
-  return album ? {...item,albumId:album.albumId,album:album.album,disc:place.disc,...(place.title?{discTitle:place.title}:{})} : item;
+  const place=albumPlace(item); if(!place) return item;
+  const album=albumGroups().get(place.key); if(!album) return item;
+  const next={...item,albumId:album.albumId,album:album.album,disc:place.disc,...(place.title?{discTitle:place.title}:{})};
+  if(!album.albumArtist || matchKey(album.albumArtist)===matchKey(item.albumArtist)) return next;
+  return applyArtistAlias({...next,albumArtist:album.albumArtist,artistId:hash(`artist\0${album.albumArtist}`)});
 }
 // Linked servers (peers.mjs keeps peer_tracks in sync with their shared index).
 // Each remote track gets its own ID here. A song this library (or a server
