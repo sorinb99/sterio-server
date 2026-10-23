@@ -13,8 +13,9 @@ const recent = new Map(), pending = new Map(), waiting = [], inUse = new Map();
 let active = 0;
 export function imageWidth(raw) {
   const value = Number(raw);
-  const width = Number.isFinite(value) && value > 0 ? Math.min(1000, value) : 384;
-  return [128, 256, 384, 600, 1000].find(size => size >= width);
+  const width = Number.isFinite(value) && value > 0 ? Math.min(2000, value) : 384;
+  // 2000: the Mac app's full-size covers (an original smaller than that stays its size).
+  return [128, 256, 384, 600, 1000, 2000].find(size => size >= width);
 }
 async function slot() {
   if (active >= 2) await new Promise(resolve => waiting.push(resolve));
@@ -51,7 +52,7 @@ export async function thumbnailPath(id, requestedWidth, {portraitOnly = false} =
       // the front-cover crop and portrait proportions already chosen upstream.
       await processFile('ffmpeg', ['-v','error','-nostdin','-y','-threads','1','-protocol_whitelist','file','-i',original,
         '-vf',`scale=w='min(iw,${width})':h='min(ih,${width})':force_original_aspect_ratio=decrease:flags=lanczos,setsar=1`,
-        '-frames:v','1','-threads','1','-q:v',width >= 600 ? '3' : '5','-pix_fmt','yuvj420p','-f','image2',temp], 15000);
+        '-frames:v','1','-threads','1','-q:v',width >= 2000 ? '2' : width >= 600 ? '3' : '5','-pix_fmt','yuvj420p','-f','image2',temp], 15000);
       await rename(temp, file); temp = undefined;
       remember(key, {at: Date.now(), file});
       return file;
@@ -92,7 +93,8 @@ export async function sendImage(req, res, file) {
   } catch (error) {done(); throw error;}
 }
 
-// Thumbnails have their own disk ceiling and never evict or touch audio caches.
+// Thumbnails have their own disk ceiling (1 GB, room for the Mac's full-size
+// covers) and never evict or touch audio caches.
 let pruning = false;
 async function pruneThumbnails() {
   if (pruning) return;
@@ -108,7 +110,7 @@ async function pruneThumbnails() {
     let bytes = entries.reduce((total, entry) => total + entry.size, 0);
     entries.sort((a, b) => a.at - b.at);
     for (const entry of entries) {
-      if (bytes <= 256 * 1024 * 1024) break;
+      if (bytes <= 1024 * 1024 * 1024) break;
       if (inUse.has(entry.file) || Date.now() - entry.at < 3600000) continue;
       await unlink(entry.file).catch(() => {}); bytes -= entry.size;
     }
