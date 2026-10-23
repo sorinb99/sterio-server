@@ -3,7 +3,7 @@ import { marks, profileDevices } from './profiles.mjs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { config } from './config.mjs';
-import { db, hash, getSetting } from './db.mjs';
+import { db, hash, getSetting, setSetting } from './db.mjs';
 import { readCue } from './cue.mjs';
 import { applyArtistAlias, canonicalArtist, storedArtwork, artworkTag, stateRevision } from './library-state.mjs';
 const extensions = new Set(['.mp3','.flac','.m4a','.aac','.alac','.wav','.aif','.aiff','.ogg','.opus','.dsf','.dff','.dsdiff']);
@@ -188,6 +188,25 @@ export async function scanLibrary() {
     console.log(`Library scan: ${scanStatus.indexed} tracks, ${scanStatus.errors} errors`);
     if (pendingScan) { pendingScan = false; setImmediate(scanLibrary); }
   }
+}
+// Automatic scans: every hour unless the administrator picks another interval
+// in the dashboard or the app (0 turns them off; Scan library always works).
+// Until then SCAN_INTERVAL_SECONDS decides.
+export const scanIntervals = [0, 15, 60, 360, 1440];
+export function scanIntervalMinutes() {
+  const saved = getSetting('scan.intervalMinutes');
+  return saved !== undefined && scanIntervals.includes(Number(saved)) ? Number(saved) : Math.max(1, Math.round(config.scanSeconds / 60));
+}
+export function setScanInterval(minutes) {
+  if (!scanIntervals.includes(minutes)) return false;
+  setSetting('scan.intervalMinutes', minutes); return true;
+}
+// Checked once a minute: a scan starts when the chosen interval has passed
+// since the last one finished, so a manual scan also resets the wait.
+export function scanWhenDue() {
+  const minutes = scanIntervalMinutes();
+  if (!minutes || scanStatus.running || !scanStatus.lastFinished) return;
+  if (Date.now() - Date.parse(scanStatus.lastFinished) >= minutes * 60000) void scanLibrary();
 }
 export function getCatalog() {
   if (catalogVersion !== version) { catalog = db.prepare('SELECT metadata FROM tracks').all().map(row => decodeMetadata(row.metadata)); catalogVersion = version; }

@@ -16,6 +16,7 @@ async function refresh(silent=false) {
     $('stats').replaceChildren(...[['Albums',s.albums],['Artists',s.artists],['Tracks',s.tracks],['Paired devices',s.devices]].map(([label,value])=>{const card=document.createElement('div');card.className='stat';const strong=document.createElement('strong');strong.textContent=number(value);const text=document.createElement('span');text.textContent=label;card.append(strong,text);return card;}));
     $('scan').disabled=s.scan.running;$('scan').textContent=s.scan.running?'Scanning…':'Scan library';
     $('scan-state').textContent=s.scan.running?`${number(s.scan.scanned)} files checked · ${s.scan.errors} errors`:`${s.scan.lastFinished?'Last completed '+new Date(s.scan.lastFinished).toLocaleString():'Waiting for first scan'} · ${s.scan.errors} errors`;
+    if(document.activeElement!==$('scan-interval'))$('scan-interval').value=String(s.scan.intervalMinutes);
     $('system').textContent=`Server ${s.version} · ${number(s.files)} audio files · ${(s.bytes/1024**3).toFixed(1)} GB indexed · ${(s.memory/1024**2).toFixed(0)} MB memory · Uptime ${Math.floor(s.uptime/3600)}h ${Math.floor(s.uptime%3600/60)}m`;
     await refreshLive();
     await refreshReport();
@@ -29,6 +30,7 @@ async function refresh(silent=false) {
   } catch(error) {if(!silent)$('message').textContent=error.message;} finally {refreshing=false;}
 }
 $('scan').onclick=async()=>{$('scan').disabled=true;try{await api('scan',{});await refresh();}catch(error){$('message').textContent=error.message;$('scan').disabled=false;}};
+$('scan-interval').onchange=async()=>{try{await api('scan/interval',{minutes:Number($('scan-interval').value)});}catch(error){$('message').textContent=error.message;}};
 async function refreshSplit(){
   const s=await api('split'),j=s.status;
   $('split').disabled=j.running;$('split').textContent=j.running?(j.force?'Re-splitting…':'Splitting…'):'Split albums into tracks';$('split-force').hidden=j.running;$('split-stop').hidden=!j.running;

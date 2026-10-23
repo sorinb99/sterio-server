@@ -18,7 +18,7 @@ export const config = {
   music: path.resolve(process.env.MUSIC_DIR || '/music'),
   data: path.resolve(process.env.DATA_DIR || '/data'),
   basePath: '/' + (process.env.BASE_PATH || '').split('/').filter(Boolean).join('/'),
-  scanSeconds: integer('SCAN_INTERVAL_SECONDS', 900, 30, 86400),
+  scanSeconds: integer('SCAN_INTERVAL_SECONDS', 3600, 30, 86400),
   maxPcmRate: integer('MAX_PCM_RATE', 192000, 44100, 384000),
   cacheBytes: integer('CACHE_MAX_MB', 4096, 128, 1048576) * 1024 * 1024,
   // Conversions unused this many days are deleted even below the size limit.

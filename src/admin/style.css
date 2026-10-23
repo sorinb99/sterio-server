@@ -79,3 +79,4 @@ footer{margin-top:34px;padding-top:18px;border-top:1px solid #292623;text-align:
 .listener-row{grid-template-columns:minmax(0,1fr) minmax(160px,280px) 80px 130px 90px}.listener-row button.danger{background:#3a2622;color:#F4B3A3;border-color:#6a3a30}
 @media(max-width:850px){.listener-row{grid-template-columns:1fr 80px 130px 90px}}
 @media(max-width:700px){.listener-row{grid-template-columns:1fr 1fr}}
+#scan-interval{display:block;margin-top:8px;background:#141312;border:1px solid #45403A;color:#F4EEE4;border-radius:9px;padding:10px 12px;font-size:12px;height:40px;max-width:100%}

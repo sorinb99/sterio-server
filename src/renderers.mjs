@@ -416,7 +416,15 @@ async function poll(session) {
     if (session.failures >= 30 && epoch === session.epoch) { session.epoch++; session.status = 'error'; session.error = 'The streamer stopped responding'; }
   } finally { session.polling = false; }
 }
-setInterval(() => { for (const session of sessions.values()) if (['playing','paused','buffering'].includes(session.status)) void poll(session); }, 1000).unref();
+// Every second while audio moves; a paused streamer is checked every 10 s.
+setInterval(() => {
+  const now = Date.now();
+  for (const session of sessions.values()) {
+    if (!['playing','paused','buffering'].includes(session.status)) continue;
+    if (session.status === 'paused' && now - (session.polledAt || 0) < 10000) continue;
+    session.polledAt = now; void poll(session);
+  }
+}, 1000).unref();
 function queueIds(value) {
   if (!Array.isArray(value) || !value.length || value.length > 500 || value.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id) || !getTrack(id))) throw new HttpError(400,'Invalid playback queue (1 to 500 tracks)');
   return value;

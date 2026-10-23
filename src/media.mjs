@@ -260,6 +260,7 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
       state.seconds = Math.min(samples, index * verbatimBlock) / rate;
       notify(state);
     };
+    let drained = false;
     try {
       for await (const chunk of child.stdout) {
         rest = rest.length ? Buffer.concat([rest, chunk]) : chunk;
@@ -267,7 +268,12 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
         for (let size; index < layout.frames && rest.length - at >= (size = frameInput(index)); at += size) await write(rest.subarray(at, at + size));
         rest = rest.subarray(at);
       }
-    } finally { clearTimeout(timeout); }
+      drained = true;
+    } finally {
+      clearTimeout(timeout);
+      // A failed write leaves FFmpeg decoding into a pipe nobody reads.
+      if (!drained && child.exitCode === null) child.kill('SIGKILL');
+    }
     const code = await exit;
     if (code !== 0) {
       console.warn(`Audio conversion failed after ${Date.now() - started} ms: ${mode} "${name}"`, errorText);

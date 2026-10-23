@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: sterio-server:0.2.3
+    image: sterio-server:0.2.4
     build: .
     container_name: sterio
     restart: unless-stopped
@@ -19,7 +19,7 @@ services:
       MUSIC_DIR: /music
       DATA_DIR: /data
       BASE_PATH: "${BASE_PATH:-}"
-      SCAN_INTERVAL_SECONDS: "${SCAN_INTERVAL_SECONDS:-900}"
+      SCAN_INTERVAL_SECONDS: "${SCAN_INTERVAL_SECONDS:-3600}"
       MAX_PCM_RATE: "${MAX_PCM_RATE:-192000}"
       CACHE_MAX_MB: "${CACHE_MAX_MB:-20480}"
       CACHE_MAX_DAYS: "${CACHE_MAX_DAYS:-30}"

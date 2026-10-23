@@ -35,7 +35,7 @@ Two ways to run it, same code:
 | `DATA_DIR` | `/data` | Database, keys, artwork, cache |
 | `PORT` / `ADMIN_PORT` | 7766 / 7767 | App API / local admin dashboard |
 | `SERVER_NAME` | `Sterio NAS` | Name shown in the apps |
-| `SCAN_INTERVAL_SECONDS` | 900 | Library rescan interval. A scan with no audio change rereads only CUE sheets and split markers that changed (`cueRead`, in memory; a dashboard rescan rereads all), so an idle library keeps its revision and the thumbnail warm-up (keyed on `libraryRevision()`) does not run again |
+| `SCAN_INTERVAL_SECONDS` | 3600 | Library rescan interval until an administrator picks one (`scan.intervalMinutes` setting: 0 off, 15, 60, 360, 1440; dashboard Library tab or the app's Server administration, `POST /api/scan/interval` / `/v1/admin/scan/interval`). `scanWhenDue` runs every minute and starts a scan once the interval has passed since `lastFinished`, so a manual scan resets the wait. A scan with no audio change rereads only CUE sheets and split markers that changed (`cueRead`, in memory; a dashboard rescan rereads all), so an idle library keeps its revision and the thumbnail warm-up (keyed on `libraryRevision()`) does not run again |
 | `MAX_PCM_RATE` | 192000 | Highest PCM rate of conversions |
 | `CACHE_MAX_MB` | 4096 in code, 20480 in `compose.yaml` | Conversion cache size (NAS `.env` currently sets 4096) |
 | `CACHE_MAX_DAYS` | 30 | Conversions unused this long are deleted |
@@ -77,7 +77,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | `library-state.mjs` | Artist aliases (merges) and chosen artwork, kept in memory |
 | `cue.mjs` | CUE parsing (metadata only). Only files holding several tracks become chapters: a CUE beside one file per track adds nothing and its files play as they are |
 | `split.mjs` | Writes CUE chapters as FLAC files in a hidden `.sterio-tracks` folder with a `.sterio-split.json` marker; chapters encoded in parallel (`SPLIT_WORKERS`), two albums in flight |
-| `media.mjs`, `delivery.mjs` | Streaming with Range, conversions (ffmpeg), conversion cache and pruning. `resolveDelivery` picks original / lossless repack / PCM conversion / CUE; lossless repack (FLAC, frame size 4096) covers FLAC with frames Apple can't decode and ALAC for apps that send `alacDecoder:false` (Android) |
+| `media.mjs`, `delivery.mjs` | Streaming with Range, conversions (ffmpeg; a verbatim conversion whose write fails kills its FFmpeg), conversion cache and pruning. `resolveDelivery` picks original / lossless repack / PCM conversion / CUE; lossless repack (FLAC, frame size 4096) covers FLAC with frames Apple can't decode and ALAC for apps that send `alacDecoder:false` (Android) |
 | `delivery.mjs`, `verbatim.mjs` | Live delivery while converting: FLAC with VERBATIM frames, layout fixed in advance so players can seek a file still being written |
 | `images.mjs` | Artwork and thumbnails |
 | `curation.mjs` | Dashboard artist merges and artwork: automatic job (6 items at a time) and manual search. Providers: Deezer (first), Apple Music (iTunes Search), Cover Art Archive via MusicBrainz, Wikimedia Commons via Wikidata; each host has its own pace (MusicBrainz 1/s, iTunes 1 per 3 s, Deezer ~8/s); JSON cached 48 h in `metadata_cache`. A search name typed on the dashboard is kept per item (`artwork_queries`), prefilled there and used by the automatic job; a result counts as a match when its title is contained in that name (albums) or equals it (artists) |
@@ -86,7 +86,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | `playlists.mjs` | Playlists owned by a profile, shares (read-only) to other profiles |
 | `connect.mjs` | Play on: presence from pulses, device list (all related devices, Macs and phones), command queue (`toggle`, `pause`, `next`, `previous`, `seek`, `play` with track ids, index, optional `position` and `paused`; each delivered command carries its `sender`), pairing (codes and discoverable Mac), `related(a,b)` = same control group or same profile |
 | `socket.mjs` | WebSocket for Play on: pulses, commands, pushes every device's change to related devices |
-| `renderers.mjs` | Network streamers: SSDP/BluOS discovery, UPnP AVTransport, the server's own queue per streamer. DSD is sent natively only when the renderer's `GetProtocolInfo` sink lists a DSD MIME, else as PCM FLAC |
+| `renderers.mjs` | Network streamers: SSDP/BluOS discovery, UPnP AVTransport, the server's own queue per streamer, polled every second while playing and every 10 s while paused. DSD is sent natively only when the renderer's `GetProtocolInfo` sink lists a DSD MIME, else as PCM FLAC |
 | `peers.mjs` | Linked servers (one server reads another's shared index) |
 | `reporting.mjs` | Listening history, device nicknames |
 | `admin.mjs`, `admin/index.html`, `app-admin.mjs` | LAN dashboard and admin from the app |

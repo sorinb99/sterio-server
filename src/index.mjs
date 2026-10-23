@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { config } from './config.mjs';
 import { db, serverId, hash } from './db.mjs';
 import { HttpError, limit, pairDevice, challengeDevice, createSession, authenticate, verifyTicket } from './auth.mjs';
-import { scanLibrary, scanStatus, albumTracks, albumViews, groupViews, page, catalogHas, getTrack, favorites, trackView, trackViews, formatFamilies, formatFamily, idsWithFormat } from './library.mjs';
+import { scanLibrary, scanStatus, scanWhenDue, albumTracks, albumViews, groupViews, page, catalogHas, getTrack, favorites, trackView, trackViews, formatFamilies, formatFamily, idsWithFormat } from './library.mjs';
 import { deliveredFormat, streamLinkedConversion, streamTrack, pruneCache } from './media.mjs';
 // Large answers (album pages, search) are compressed for apps away from home.
 const json = (res, status, body) => {
@@ -242,7 +242,7 @@ server.listen(config.port,config.host,() => {
   void migrateSplitFolders().catch(error => console.warn('Split folders:', error.message)).finally(() => scanLibrary());
 });
 const adminServer = startAdmin();
-const scanTimer = setInterval(() => void scanLibrary(),config.scanSeconds * 1000);
+const scanTimer = setInterval(scanWhenDue,60000);
 const pruneTimer = setInterval(() => void pruneCache().catch(error => console.warn('Cache cleanup:',error.message)),300000);
 function shutdown(code = 0) { closeSockets(); adminServer?.close(); clearInterval(scanTimer); clearInterval(pruneTimer); server.close(() => { db.close(); process.exit(code); }); server.closeIdleConnections(); adminServer?.closeIdleConnections(); setTimeout(() => process.exit(code),10000).unref(); }
 process.on('SIGTERM',() => shutdown()); process.on('SIGINT',() => shutdown());
