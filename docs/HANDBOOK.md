@@ -109,7 +109,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 - Version: `package.json`, `compose.yaml` (`image:`) and `src/index.mjs`
   (`/v1/info`) — change all three together. Same rules as the app
   (`../sterio/docs/VERSIONING.md`): PATCH for fixes, MINOR for a feature or a
-  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.2 is the current version.
+  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.3 is the current version.
 - **Protected build (`scripts/build.mjs`).** The shipped server never contains
   source. `node scripts/build.mjs` bundles `src/` with esbuild (ESM, split
   chunks, `packages: 'external'` so Node built-ins stay) and obfuscates every

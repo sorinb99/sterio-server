@@ -546,6 +546,11 @@ The Sterio logo is now the ribbon S, on the dashboard (and as its browser icon) 
 
 Same code as 0.1.62. From here on the server follows the app's rules: PATCH for fixes, MINOR for a new feature or API, 1.0 with the public release.
 
+### 0.2.3: graphite and orange
+
+The dashboard follows the app's new dark theme: warm graphite with orange
+accents. The Mac server's icon is now an orange tile with a graphite ribbon.
+
 ### 0.2.2: Home works again in the protected build
 
 The protected build of 0.2.1 placed shared code one folder too deep, so the

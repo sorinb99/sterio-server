@@ -102,7 +102,7 @@ done
 lipo -create "$work/launcher-arm64" "$work/launcher-x86_64" -output "$app/Contents/MacOS/Sterio Server"
 sed -e "s/__VERSION__/$version/g" -e "s/__BUILD__/$build/g" "$here/Info.plist" > "$app/Contents/Info.plist"
 
-# The Sterio Server icon (peach), compiled into Assets.car and AppIcon.icns.
+# The Sterio Server icon (orange), compiled into Assets.car and AppIcon.icns.
 catalog="$stage-Assets.xcassets"; mkdir -p "$catalog"
 echo '{"info":{"version":1,"author":"xcode"}}' > "$catalog/Contents.json"
 cp -R "$here/AppIcon.appiconset" "$catalog/"
