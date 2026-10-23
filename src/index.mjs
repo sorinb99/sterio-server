@@ -155,7 +155,9 @@ async function handler(req,res) {
     // so the app can tell an older server that ignored it.
     const format = formatFamilies.includes(url.searchParams.get('format')) ? url.searchParams.get('format') : '';
     if (method === 'GET' && route === '/v1/albums') {
-      const items = albumViews().filter(item => (!url.searchParams.get('artistId') || item.artistId === url.searchParams.get('artistId')) && (!url.searchParams.get('genreId') || item.genreIds.has(url.searchParams.get('genreId'))) && (!format || item.formats.some(value => formatFamily(value) === format)));
+      // A genre family from the app lists several genre ids, one per line.
+      const genreIds = (url.searchParams.get('genreId') || '').split('\n').filter(Boolean);
+      const items = albumViews().filter(item => (!url.searchParams.get('artistId') || item.artistId === url.searchParams.get('artistId')) && (!genreIds.length || genreIds.some(id => item.genreIds.has(id))) && (!format || item.formats.some(value => formatFamily(value) === format)));
       return json(res,200,{ ...page(items,url.searchParams,favoriteIds), format });
     }
     if (method === 'GET' && ['/v1/artists','/v1/genres'].includes(route)) {

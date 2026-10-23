@@ -104,6 +104,9 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 `renderers`, `renderers/discover`, `renderers/stream`, `renderers/:id…`,
 `peers/{index,request,pair,leave}`. WebSocket for Play on on the same port.
 
+`albums?genreId=` takes several genre ids separated by newlines (a genre
+family from the app's Library) and returns albums with any of them.
+
 ## Build and deploy
 
 - Version: `package.json`, `compose.yaml` (`image:`) and `src/index.mjs`
