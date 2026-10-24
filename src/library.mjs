@@ -5,6 +5,7 @@ import path from 'node:path';
 import { config } from './config.mjs';
 import { db, hash, getSetting, setSetting } from './db.mjs';
 import { readCue } from './cue.mjs';
+import { readSacd, sacdTracks } from './sacd.mjs';
 import { applyArtistAlias, canonicalArtist, storedArtwork, artworkTag, stateRevision } from './library-state.mjs';
 const extensions = new Set(['.mp3','.flac','.m4a','.aac','.alac','.wav','.aif','.aiff','.ogg','.opus','.dsf','.dff','.dsdiff']);
 export const cacheDir = path.join(config.data, 'cache');
@@ -14,6 +15,9 @@ export const SPLIT_FOLDER = '.sterio-tracks', LEGACY_SPLIT_FOLDER = 'Tracks', SP
 await mkdir(cacheDir, { recursive: true });
 let version = 0, catalogVersion = -1, catalog = [];
 export const scanStatus = { running: false, scanned: 0, indexed: 0, errors: 0, lastFinished: null };
+// Disc images the last scan found that are not SACDs (DVD, data discs):
+// listed on the dashboard, never counted as scan errors.
+export const sacdSkipped = new Map();
 let pendingScan = false;
 // CUE files read by an earlier scan of this run (path -> size:mtime, and
 // whether it was skipped, so the error count stays the same). A scan
@@ -118,8 +122,8 @@ function reconcileAlbumTags() {
 export async function scanLibrary() {
   if (scanStatus.running) { pendingScan = true; return; }
   Object.assign(scanStatus, { running: true, scanned: 0, errors: 0 });
-  const seen = new Set(), cueFiles=[], splitFolders=[]; let complete = true;
-  const old = new Map(db.prepare('SELECT id,size,mtime FROM tracks').all().map(row => [row.id,row]));
+  const seen = new Set(), cueFiles=[], splitFolders=[], isoFiles=[]; let complete = true;
+  const old = new Map(db.prepare('SELECT id,path,size,mtime FROM tracks').all().map(row => [row.id,row]));
   const insert = db.prepare('INSERT INTO tracks VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,size=excluded.size,mtime=excluded.mtime,metadata=excluded.metadata');
   let publishedAt = Date.now(), unpublished = false, audioChanged = false;
   async function walk(folder) {
@@ -132,6 +136,7 @@ export async function scanLibrary() {
       const relative = path.join(folder, entry.name);
       if (entry.isDirectory()) { await walk(relative); continue; }
       if (entry.isFile() && path.extname(entry.name).toLowerCase()==='.cue') { cueFiles.push(relative); continue; }
+      if (entry.isFile() && path.extname(entry.name).toLowerCase()==='.iso') { isoFiles.push(relative); continue; }
       if (!entry.isFile() || !extensions.has(path.extname(entry.name).toLowerCase())) continue;
       const id = hash(relative); seen.add(id); scanStatus.scanned++;
       try {
@@ -150,6 +155,23 @@ export async function scanLibrary() {
   }
   try {
     await walk('');
+    // SACD images: one track per track of the disc's stereo area, read from
+    // the disc's tables (sacd.mjs). An unchanged image keeps its tracks.
+    const byImage=new Map();
+    for(const row of old.values()) { const at=row.path.lastIndexOf('.iso#'); if(at>0) { const image=row.path.slice(0,at+4); if(!byImage.has(image)) byImage.set(image,[]); byImage.get(image).push(row); } }
+    const skipped=new Map();
+    for(const relative of isoFiles.sort()) {
+      try {
+        const info=await stat(await musicPath(relative)), known=byImage.get(relative)||[];
+        if(known.length && known.every(row=>row.size===info.size && row.mtime===info.mtimeMs)) { for(const row of known) { seen.add(row.id); scanStatus.scanned++; } continue; }
+        const items=sacdTracks(relative,await readSacd(await musicPath(relative)),info.size,info.mtimeMs,hash);
+        if(!items.length) throw new Error('No stereo area');
+        for(const item of items) { seen.add(item.id); scanStatus.scanned++; insert.run(item.id,item.path,info.size,info.mtimeMs,JSON.stringify(item)); }
+        version++; audioChanged=true;
+      } catch(error) { skipped.set(relative,error.message); }
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    sacdSkipped.clear(); for(const [relative,reason] of skipped) sacdSkipped.set(relative,reason);
     if (unpublished) version++;
     if (complete) for (const id of old.keys()) if (!seen.has(id)) { db.prepare('DELETE FROM tracks WHERE id=?').run(id); version++; audioChanged = true; }
     reconcileAlbumTags();
@@ -427,8 +449,10 @@ function buildIdsWithFormat(kind, family) {
 }
 // What this server shares with linked servers: its own tracks only, never
 // tracks it received from another server, so links can never loop.
+// DST-compressed SACD tracks stay here: they play only converted to PCM, and
+// a linked server asks for the original.
 export function sharedTracks() {
-  return localAlbumTracks(null).map(item=>({id:item.id,title:item.title,artist:item.artist,albumArtist:item.albumArtist,album:item.album,albumId:item.albumId,genres:item.genres,durationMs:item.durationMs,
+  return localAlbumTracks(null).filter(item=>!item.sacd?.dst).map(item=>({id:item.id,title:item.title,artist:item.artist,albumArtist:item.albumArtist,album:item.album,albumId:item.albumId,genres:item.genres,durationMs:item.durationMs,
     number:item.number,disc:item.disc,year:item.year,format:item.format,dsd:item.dsd===true,...(item.segment?{segment:item.segment}:{}),
     // Artwork versions: a cover or photo found later changes them, so linked servers refresh it.
     imageTag:artworkTag(item.albumId,'front-v4'),artistImageTag:artworkTag(item.artistId,'artist-v3')}));
@@ -538,7 +562,8 @@ async function renderArtwork(id, portraitOnly=false) {
   if(track?.albumId===id && track.disc>1) track=tracks.filter(item=>!item.remote && item.albumId===id).reduce((best,item)=>(item.disc||1)<(best.disc||1) ? item : best,track);
   if(!track || track.remote) return null;
   const artist=id===track.artistId;
-  const source=await musicPath(track.splitSource || track.path), folder=path.dirname(source);
+  // A SACD image has no picture of its own: only the folder's covers.
+  const source=await musicPath(track.splitSource || track.sacd?.image || track.path), folder=path.dirname(source);
   let selected=null, isArtistPhoto=false;
   const entries=await readdir(folder);
   const pick=(names,patterns)=>patterns.map(pattern=>names.find(name=>pattern.test(name))).find(Boolean);
@@ -571,6 +596,7 @@ async function renderArtwork(id, portraitOnly=false) {
       if(selected) break;
     }
   }
+  if(!selected && track.sacd) return null;
   const info=await stat(selected||source);
   const image=path.join(cacheDir,`${id}-${hash(`${selected||source}:${info.size}:${info.mtimeMs}:front-v4`).slice(0,16)}.jpg`);
   try { await stat(image); return image; } catch {}
@@ -606,4 +632,15 @@ export async function artworkPath(id, {portraitOnly=false, localOnly=false}={}) 
   })().finally(() => artworkJobs.delete(key));
   artworkJobs.set(key,job);
   return job;
+}
+
+// SACD images in the library, for the dashboard and the app.
+export function sacdImages() {
+  const images=new Map();
+  for(const item of getCatalog()) {
+    if(!item.sacd) continue;
+    const image=images.get(item.sacd.image) || { path:item.sacd.image, album:item.album, artist:item.albumArtist, year:item.year, dst:item.sacd.dst, tracks:0, seconds:0 };
+    image.tracks++; image.seconds+=Math.round(item.durationMs/1000); images.set(item.sacd.image,image);
+  }
+  return { images:[...images.values()].sort((a,b)=>a.path.localeCompare(b.path)), skipped:[...sacdSkipped].map(([path,reason])=>({ path, reason })) };
 }

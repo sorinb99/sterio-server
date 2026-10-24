@@ -21,6 +21,7 @@ async function refresh(silent=false) {
     await refreshLive();
     await refreshReport();
     await refreshSplit();
+    await refreshSacd();
     await refreshPeers();
     await refreshRequests();
     await refreshRenderers();
@@ -36,6 +37,11 @@ async function refreshSplit(){
   $('split').disabled=j.running;$('split').textContent=j.running?(j.force?'Re-splitting…':'Splitting…'):'Split albums into tracks';$('split-force').hidden=j.running;$('split-stop').hidden=!j.running;
   const progress=j.running?`${j.done} of ${j.total} albums${j.skipped?` (${j.skipped} already split)`:''} · ${j.current}`:`${s.split} of ${s.albums} CUE albums split into tracks${j.finished?' · last run '+new Date(j.finished).toLocaleString():''}`;
   $('split-state').textContent=progress+(j.errors.length?` · ${j.errors.length} errors: ${j.errors[j.errors.length-1]}`:'');
+}
+async function refreshSacd(){
+  const s=await api('sacd'),row=(title,detail,side)=>{const item=document.createElement('div');item.className='recent-item';const a=document.createElement('div'),b=document.createElement('div'),t=document.createElement('time');const strong=document.createElement('strong');strong.textContent=title[0];const small=document.createElement('small');small.textContent=title[1];a.append(strong,small);const d=document.createElement('strong');d.textContent=detail[0];const f=document.createElement('small');f.textContent=detail[1];b.append(d,f);t.textContent=side;item.append(a,b,t);return item;};
+  $('sacd-state').textContent=s.images.length?`${s.images.length} SACD ${s.images.length===1?'image':'images'} in the library${s.skipped.length?` · ${s.skipped.length} other disc ${s.skipped.length===1?'image':'images'} skipped`:''}`:'No SACD images found yet. Put .iso files in the music folder, then scan the library.';
+  $('sacd-list').replaceChildren(...s.images.map(i=>row([i.album,i.artist],[`Stereo · ${i.dst?'DST, plays as PCM':'DSD, native'} · ${i.tracks} tracks · ${clock(i.seconds)}`,i.path],i.year?String(i.year):'')),...s.skipped.map(i=>row([i.path.split('/').pop(),'Not a SACD image'],[i.reason,i.path],'')));
 }
 $('split').onclick=async()=>{$('split').disabled=true;try{await api('split/start',{});await refreshSplit();}catch(error){$('message').textContent=error.message;$('split').disabled=false;}};
 $('split-force').onclick=async()=>{if(!confirm('Rewrite the tracks of every split album? Albums stay playable while each one is rewritten.'))return;$('split-force').disabled=true;try{await api('split/start',{force:true});await refreshSplit();}catch(error){$('message').textContent=error.message;}finally{$('split-force').disabled=false;}};

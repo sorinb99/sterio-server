@@ -14,14 +14,18 @@ const reported = mode => ({ verbatim:'pcm', cueverbatim:'cue' })[mode] || mode;
 // ALAC repacked as FLAC, losslessly, like FLAC files Apple can't decode.
 const alacRepack = (track, input) => input.alacDecoder === false && String(conversionSource(track).format.codec).toLowerCase() === 'alac';
 const repackFor = async (track, input) => alacRepack(track, input) || await needsLosslessRepack(track);
+// A DST-compressed SACD area has no DSD file to send: it always plays
+// converted to PCM, even for a device that plays DSD.
+const dstOnly = track => track.sacd?.dst === true;
 const announced = mode => mode === 'verbatim' || mode === 'cueverbatim' ? { pcmDelivery:'flac-verbatim-v1' } : {};
 // One delivery decision for app devices and network streamers alike.
 // sourceOnly: a linked server asks for the original and converts it itself.
 export async function resolveDelivery(device, track, input) {
   if (track.remote) return resolveLinked(device, track, input);
   const plain = input.sourceOnly === true;
-  const conversion = !plain && (track.dsd ? input.delivery==='pcm' && input.allowDsdToPcm===true : needsConversion(track) && input.delivery !== 'original');
-  if (conversion && input.allowConversion !== true) return { status:409, body:{ code:'conversion_required', error:'This audio format needs server conversion for this device.' } };
+  if (plain && dstOnly(track)) return { status:409, body:{ code:'conversion_required', error:'This SACD track plays only converted to PCM.' } };
+  const conversion = !plain && (dstOnly(track) || (track.dsd ? input.delivery==='pcm' && input.allowDsdToPcm===true : needsConversion(track) && input.delivery !== 'original'));
+  if (conversion && input.allowConversion !== true && !dstOnly(track)) return { status:409, body:{ code:'conversion_required', error:'This audio format needs server conversion for this device.' } };
   // Explicit client opt-in keeps existing clients and full-file playback unchanged.
   const cue = !plain && !conversion && input.cueDelivery === 'flac-track-v1' && canDeliverCueFlac(track);
   const cueMode = cue && streams(input) && canStreamCue(track) ? 'cueverbatim' : 'cue';
@@ -34,7 +38,7 @@ export async function resolveDelivery(device, track, input) {
 }
 export async function prepareDelivery(track, input) {
   if (track.remote) return prepareLinked(track, input);
-  if (input.allowConversion!==true || (track.dsd && input.allowDsdToPcm!==true)) throw new HttpError(403,'Explicit conversion permission is required');
+  if (!dstOnly(track) && (input.allowConversion!==true || (track.dsd && input.allowDsdToPcm!==true))) throw new HttpError(403,'Explicit conversion permission is required');
   const cue = input.cueDelivery === 'flac-track-v1' && canDeliverCueFlac(track);
   const live = cue ? streams(input) && canStreamCue(track) : verbatim(track, input);
   const ready = await prepareConversion(track, cue ? (live ? 'cueverbatim' : 'cue') : live ? 'verbatim' : await repackFor(track, input) ? 'lossless' : 'pcm', 8000);

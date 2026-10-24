@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { db, hash, setSetting } from './db.mjs';
 import { HttpError, limit } from './auth.mjs';
-import { scanLibrary, scanStatus, scanIntervalMinutes, scanIntervals, setScanInterval } from './library.mjs';
+import { scanLibrary, scanStatus, scanIntervalMinutes, scanIntervals, setScanInterval, sacdImages } from './library.mjs';
 import { splitSummary, startSplit, stopSplit } from './split.mjs';
 import { decideRequest, pendingRequests } from './requests.mjs';
 // Server administration from the app, for devices made admin in the LAN admin panel.
@@ -37,7 +37,7 @@ export async function appAdmin(route, method, device, body) {
   if (method === 'GET' && route === '/v1/admin/access') return { admin: isAdmin(device.id) };
   // 403, not 401: a 401 means an expired device session to the app.
   if (!isAdmin(device.id)) throw Object.assign(new HttpError(403, 'This device is not a server administrator'), { code: 'not_admin' });
-  if (method === 'GET' && route === '/v1/admin/status') return { scan: { ...scanStatus, intervalMinutes: scanIntervalMinutes(), intervals: scanIntervals }, split: await splitSummary() };
+  if (method === 'GET' && route === '/v1/admin/status') return { scan: { ...scanStatus, intervalMinutes: scanIntervalMinutes(), intervals: scanIntervals }, split: await splitSummary(), sacd: sacdImages() };
   if (method === 'GET' && route === '/v1/admin/requests') return { items: pendingRequests() };
   if (method === 'POST' && route === '/v1/admin/requests/decide') return decideRequest(await body());
   if (method === 'GET' && route === '/v1/admin/devices') return { items: deviceList(), self: device.id };

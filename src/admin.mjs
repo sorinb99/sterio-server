@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { config } from './config.mjs';
 import { db, hash, setSetting } from './db.mjs';
-import { scanLibrary, scanStatus, scanIntervalMinutes, scanIntervals, setScanInterval, albumViews, groupViews, albumTracks } from './library.mjs';
+import { scanLibrary, scanStatus, scanIntervalMinutes, scanIntervals, setScanInterval, albumViews, groupViews, albumTracks, sacdImages } from './library.mjs';
 import { HttpError, limit } from './auth.mjs';
 import { splitSummary, startSplit, stopSplit } from './split.mjs';
 import { removeDevice, setDeviceAdmin } from './app-admin.mjs';
@@ -114,6 +114,7 @@ export function startAdmin() {
       if(req.method==='POST' && route==='/api/renderers/remove') { await removeRenderer(String((await input(req)).id)); return json(res,200,listRenderers()); }
       if(req.method==='POST' && route==='/api/renderers/stop') { await controlRenderer({id:'admin',name:'Admin'},String((await input(req)).id),{action:'stop'},true); return json(res,200,listRenderers()); }
       if(req.method==='GET' && route==='/api/split') return json(res,200,await splitSummary());
+      if(req.method==='GET' && route==='/api/sacd') return json(res,200,sacdImages());
       if(req.method==='POST' && route==='/api/split/start') return json(res,202,startSplit({force:(await input(req)).force===true}));
       if(req.method==='POST' && route==='/api/split/stop') return json(res,200,stopSplit());
       if(req.method==='POST' && route==='/api/scan') { if(!scanStatus.running) void scanLibrary().catch(error=>console.error('Admin scan:',error.message)); return json(res,202,{ok:true}); }

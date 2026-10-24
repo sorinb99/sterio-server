@@ -2,6 +2,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { stat, readdir, unlink, rename, statfs, utimes, open } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { config } from './config.mjs';
@@ -10,6 +11,7 @@ import { hash } from './db.mjs';
 import { HttpError } from './auth.mjs';
 import { load } from './load.mjs';
 import { verbatimLayout, verbatimFrame, verbatimBlock, verbatimBits } from './verbatim.mjs';
+import { sacdDsf, sendSacd, writeSacdDff } from './sacd.mjs';
 const conversionErrors = new Map();
 // Linked DSD → PCM conversions a streamer may play while they run: the
 // original comes over the internet, so waiting for the whole file can take
@@ -71,6 +73,8 @@ const legacyPcmCacheName = track => path.join(cacheDir, `${track.id}-${hash(`${t
 export async function pruneCache(protectedFile) {
   const files = [];
   for (const name of await readdir(cacheDir)) {
+    // A DST file left by a conversion that never finished (server stopped).
+    if (/^sacd-[a-f0-9]{16}\.dff\.part$/.test(name)) { const info = await stat(path.join(cacheDir, name)).catch(() => null); if (info && info.mtimeMs < Date.now() - 86400000) await unlink(path.join(cacheDir, name)).catch(() => {}); continue; }
     if (!/^[a-f0-9]{64}-[a-f0-9]{16}\.(flac|jpg)$/.test(name)) continue;
     const file = path.join(cacheDir, name);
     const info = await stat(file).catch(() => null);
@@ -102,6 +106,19 @@ function resampler() {
   }).then(text => text.includes('libsoxr') ? 'aresample=resampler=soxr:precision=28' : 'aresample=resampler=swr:filter_size=128:phase_shift=20:cutoff=0.97');
   return resamplerFilter;
 }
+// SACD tracks reach FFmpeg as a DSF stream on its input (plain DSD) or as a
+// DSDIFF file written for this conversion and removed after it (DST).
+async function sacdInput(track) {
+  const image = await musicPath(track.sacd.image);
+  if (!track.sacd.dst) {
+    let input;
+    return { source:'pipe:0', options:['-protocol_whitelist','pipe','-f','dsf'], stdin:'pipe',
+      feed: child => { input = Readable.from(sacdDsf(image, track.sacd)); input.on('error', () => child.kill('SIGKILL')); child.stdin.on('error', () => {}); child.on('close', () => input.destroy()); input.pipe(child.stdin); },
+      cleanup: async () => { input?.destroy(); } };
+  }
+  const file = await writeSacdDff(image, track.sacd, cacheDir);
+  return { source:file, options:['-protocol_whitelist','file'], stdin:'ignore', feed: () => {}, cleanup: () => unlink(file).catch(() => {}) };
+}
 const inputOptions = (source, sourceUrl) => sourceUrl ? ['-protocol_whitelist','file,http,https,tcp,tls,crypto','-reconnect','1','-reconnect_on_network_error','1','-reconnect_delay_max','10','-rw_timeout','30000000',...(source.startsWith('https:') && caFile ? ['-ca_file',caFile] : [])] : ['-protocol_whitelist','file'];
 // sourceUrl: a linked server's original, read over HTTP by FFmpeg.
 async function convert(track, destination, mode = 'pcm', sourceUrl) {
@@ -110,12 +127,14 @@ async function convert(track, destination, mode = 'pcm', sourceUrl) {
   const started = Date.now();
   console.log(`Conversion start: ${mode} "${name}" waited ${started - queued} ms (active ${active}, queued ${waiting.length})`);
   const temp = destination + '.' + randomBytes(8).toString('hex') + '.part';
+  let sacd = null;
   try {
     const available = await statfs(cacheDir);
     if (available.bavail * available.bsize < 256 * 1024 * 1024) throw new HttpError(507, 'Not enough free space in the server data volume');
-    let source = sourceUrl ? await sourceUrl() : await musicPath(track.path);
+    if (!sourceUrl && track.sacd) sacd = await sacdInput(track);
+    let source = sourceUrl ? await sourceUrl() : sacd ? sacd.source : await musicPath(track.path);
     let reframePcm = false;
-    if (mode === 'pcm' && !sourceUrl) {
+    if (mode === 'pcm' && !sourceUrl && !sacd) {
       const legacy = legacyPcmCacheName(track);
       reframePcm = await stat(legacy).then(info => info.isFile()).catch(() => false);
       if (reframePcm) source = legacy;
@@ -135,9 +154,10 @@ async function convert(track, destination, mode = 'pcm', sourceUrl) {
         ? ['-c:a','flac','-compression_level','5','-frame_size','4096']
         : ['-af',filter,'-ar',String(format.sampleRate),'-ac',String(format.channels),'-sample_fmt','s32','-c:a','flac','-compression_level','5','-frame_size','4096'];
       // A remote original survives short network drops; seeking uses byte ranges.
-      const input = inputOptions(source, sourceUrl);
+      const input = sacd ? sacd.options : inputOptions(source, sourceUrl);
       const state = sourceUrl && mode === 'pcm' ? { temp, started: Date.now(), seconds: 0, done: false, failed: false } : null;
-      const child = spawn('ffmpeg', ['-v','error','-nostdin','-y',...(state ? ['-progress','pipe:1'] : []),...input,...inputSeek,'-i',source,'-map','0:a:0','-map_metadata','-1','-vn','-sn','-dn',...audioOptions,'-f','flac',temp], { stdio: ['ignore',state ? 'pipe' : 'ignore','pipe'] });
+      const child = spawn('ffmpeg', ['-v','error','-nostdin','-y',...(state ? ['-progress','pipe:1'] : []),...input,...inputSeek,'-i',source,'-map','0:a:0','-map_metadata','-1','-vn','-sn','-dn',...audioOptions,'-f','flac',temp], { stdio: [sacd ? sacd.stdin : 'ignore',state ? 'pipe' : 'ignore','pipe'] });
+      sacd?.feed(child);
       if (state) {
         live.set(destination, state);
         // How much audio is written, to judge whether playback can start now.
@@ -187,6 +207,7 @@ async function convert(track, destination, mode = 'pcm', sourceUrl) {
     // A streamer still reading the live file keeps its open handle.
     const state = live.get(destination);
     if (state?.temp === temp) { if (!state.done) state.failed = true; live.delete(destination); }
+    await sacd?.cleanup();
     await unlink(temp).catch(() => {}); release();
   }
 }
@@ -219,9 +240,10 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
   console.log(`Conversion start: ${mode} "${name}" waited ${started - queued} ms (active ${active}, queued ${waiting.length})`);
   const temp = destination + '.' + randomBytes(8).toString('hex') + '.part';
   const state = { temp, layout: null, written: 0, seconds: 0, done: false, failed: false, waiters: new Set() };
-  let handle;
+  let handle, sacd = null;
   try {
-    const source = sourceUrl ? await sourceUrl() : await musicPath(track.path);
+    if (!sourceUrl && track.sacd) sacd = await sacdInput(track);
+    const source = sourceUrl ? await sourceUrl() : sacd ? sacd.source : await musicPath(track.path);
     let rate, channels, bits, samples, seek = [], length = [], filter;
     if (mode === 'cueverbatim') {
       // The same sample boundaries as the compressed chapter (see convert).
@@ -246,7 +268,8 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
     state.layout = layout; state.written = layout.header.length;
     growing.set(destination, state);
     const raw = bits === 16 ? 's16le' : 's24le';
-    const child = spawn('ffmpeg', ['-v','error','-nostdin',...inputOptions(source, sourceUrl),...seek,'-i',source,...length,'-map','0:a:0','-vn','-sn','-dn','-af',filter,'-c:a',`pcm_${raw}`,'-f',raw,'pipe:1'], { stdio: ['ignore','pipe','pipe'] });
+    const child = spawn('ffmpeg', ['-v','error','-nostdin',...(sacd ? sacd.options : inputOptions(source, sourceUrl)),...seek,'-i',source,...length,'-map','0:a:0','-vn','-sn','-dn','-af',filter,'-c:a',`pcm_${raw}`,'-f',raw,'pipe:1'], { stdio: [sacd ? sacd.stdin : 'ignore','pipe','pipe'] });
+    sacd?.feed(child);
     let errorText = '';
     child.stderr.on('data', chunk => { errorText = (errorText + chunk.toString()).replace(/ticket=[^\s&"']+/g,'ticket=…').slice(-1000); });
     const exit = new Promise(resolve => { child.on('close', resolve); child.on('error', () => resolve(-1)); });
@@ -290,6 +313,7 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
   } finally {
     if (!state.done) { state.failed = true; notify(state); }
     if (growing.get(destination) === state) growing.delete(destination);
+    await sacd?.cleanup();
     await handle?.close().catch(() => {});
     await unlink(temp).catch(() => {}); release();
   }
@@ -495,6 +519,11 @@ export async function streamTrack(req,res,id,mode) {
     if (mode === 'cueverbatim' && !canDeliverCueFlac(track)) throw new HttpError(422, 'This track is not a FLAC CUE chapter');
     const source = mode === 'verbatim' ? conversionSource(track) : track, destination = cacheName(source, mode);
     return streamVerbatim(req, res, destination, () => convertVerbatim(source, destination, undefined, mode));
+  }
+  // A SACD track's original: DSF made from the image while it is read.
+  if (mode === 'original' && track.sacd) {
+    if (track.sacd.dst) throw new HttpError(422, 'This SACD area is DST-compressed and plays converted to PCM');
+    return sendSacd(req, res, await musicPath(track.sacd.image), track.sacd);
   }
   const file = await playablePath(track, mode);
   return sendFile(req,res,file,mode !== 'original' ? 'audio/flac' : undefined);
