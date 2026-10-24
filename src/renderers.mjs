@@ -226,6 +226,9 @@ export async function addRenderer(input, base, owner = '') {
   const existing = db.prepare('SELECT id FROM renderers WHERE location=? AND owner=?').get(found.location, owner)
     || db.prepare('SELECT id, location, name, kind FROM renderers WHERE owner=?').all(owner).find(row => row.kind === found.kind && row.name.trim().toLowerCase() === found.name.slice(0,80).trim().toLowerCase() && new URL(row.location).hostname === foundHost);
   const id = existing?.id || randomUUID();
+  // A streamer that did not play DSD stays known for it (refuseDsd).
+  const previous = existing && db.prepare('SELECT control FROM renderers WHERE id=?').get(id);
+  if (previous && JSON.parse(previous.control).dsdRefused) found.control.dsdRefused = true;
   db.prepare(`INSERT INTO renderers (id,kind,name,model,location,control,stream_base,created,owner) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,model=excluded.model,location=excluded.location,control=excluded.control,stream_base=CASE WHEN excluded.stream_base<>'' THEN excluded.stream_base ELSE renderers.stream_base END`)
     .run(id, found.kind, found.name.slice(0,80), found.model.slice(0,120), found.location, JSON.stringify(found.control), base || '', Date.now(), owner);
   // A session keeps playing on the updated address.
@@ -317,8 +320,20 @@ function itemFor(device, track, value, control, base) {
     duration:segment ? (segment.endSeconds || track.durationMs / 1000) - segment.startSeconds : (track.durationMs || 0) / 1000 };
 }
 // The app's Native DSD to streamers setting (play request's dsd): DSF to a
-// DLNA streamer even when it lists no DSD format (the Eversolo T8).
-const sessionControl = session => session.nativeDsd && session.renderer.kind === 'upnp' ? { ...session.renderer.control, dsd:true } : session.renderer.control;
+// DLNA streamer even when it lists no DSD format (the Eversolo T8). A
+// streamer that did not play it gets PCM from then on (refuseDsd).
+const sessionControl = session => session.nativeDsd && session.renderer.kind === 'upnp' && !session.renderer.control.dsdRefused ? { ...session.renderer.control, dsd:true } : session.renderer.control;
+// DSF sent only because of that setting, not because the streamer lists it.
+const dsdTrial = (session, item) => item?.dsd && !session.renderer.control.dsd;
+// The streamer refused the DSF or did not start it: remember that and play
+// the same track again, converted to PCM, from where it was.
+function refuseDsd(session, offset, reason) {
+  const renderer = session.renderer;
+  console.warn(`Streamer ${renderer.name} did not play DSD (${reason}); it gets PCM from now on`);
+  renderer.control = { ...renderer.control, dsdRefused:true };
+  db.prepare('UPDATE renderers SET control=? WHERE id=?').run(JSON.stringify(renderer.control), renderer.id);
+  return start(session, offset);
+}
 async function deliver(session, index, epoch) {
   const track = getTrack(session.queue[index]); if (!track) throw new HttpError(404,'Track not found');
   const renderer = session.renderer, device = deviceFor(renderer);
@@ -364,7 +379,8 @@ async function start(session, offset = 0) {
     const item = await deliver(session, session.index, epoch);
     if (!item || epoch !== session.epoch) return;
     session.current = item; session.duration = item.duration;
-    await driver.load(renderer, item);
+    try { await driver.load(renderer, item); }
+    catch (error) { if (dsdTrial(session, item) && epoch === session.epoch) return await refuseDsd(session, offset, error.message); throw error; }
     if (epoch !== session.epoch) return;
     session.loadedAt = Date.now();
     const target = (item.segment?.startSeconds || 0) + offset;
@@ -426,6 +442,8 @@ async function poll(session) {
       // Stopped at the end: the next track. Stopped earlier: someone stopped the streamer.
       if (session.duration > 0 && session.position >= session.duration - 4) return await advance(session, 1);
       report(session,'stop'); session.status = 'stopped';
+    } else if (session.status === 'buffering' && dsdTrial(session, session.current) && state.state !== 'paused' && Date.now() - session.loadedAt > 12000) {
+      return await refuseDsd(session, session.position, `still ${state.state} after 12 s`);
     } else if (state.state === 'stopped' && session.status === 'buffering' && Date.now() - session.loadedAt > 30000) {
       session.epoch++; session.status = 'error'; session.error = `${renderer.name} did not start playback. It may not support this format.`;
     }
