@@ -27,6 +27,9 @@ const seconds = value => { const match = String(value || '').match(/^(\d+):(\d{1
 // Each format's usual MIME spellings; the renderer's own (from GetProtocolInfo) wins.
 const mimes = { flac:['audio/flac','audio/x-flac'], dsf:['audio/dsf','audio/x-dsf','audio/dsd','audio/x-dsd'], dff:['audio/dff','audio/x-dff','audio/dsd','audio/x-dsd'], mp3:['audio/mpeg','audio/mp3'], m4a:['audio/mp4','audio/x-m4a','audio/m4a'], aac:['audio/aac','audio/mp4'], alac:['audio/mp4','audio/x-m4a'], wav:['audio/wav','audio/x-wav','audio/wave'], aif:['audio/aiff','audio/x-aiff'], aiff:['audio/aiff','audio/x-aiff'] };
 const extensions = { flac:'flac', dsf:'dsf', dff:'dff', dsdiff:'dff', mp3:'mp3', m4a:'m4a', aac:'m4a', alac:'m4a', wav:'wav', aif:'aif', aiff:'aiff' };
+// Rate, bit depth and channels on <res>: streamers that show the format read
+// them with the MIME type (an Eversolo T8 showed a FLAC as "PCM").
+const resAudio = ({ format = {}, dsd }) => (format.sampleRate ? ` sampleFrequency="${Math.round(format.sampleRate)}"` : '') + (format.bitDepth && !dsd ? ` bitsPerSample="${format.bitDepth}"` : '') + (format.channels ? ` nrAudioChannels="${format.channels}"` : '');
 const mimeFor = (format, sink = []) => { const names = mimes[String(format.container || format.codec).toLowerCase()] || mimes.flac; return names.find(name => sink.includes(name)) || names[0]; };
 // Streamers live on the LAN only: the server never contacts public hosts for them.
 function lanUrl(value) {
@@ -119,7 +122,7 @@ const upnp = {
     return answer.text;
   },
   didl(item) {
-    return `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/"><item id="${escape(item.id)}" parentID="0" restricted="1"><dc:title>${escape(item.title)}</dc:title><upnp:artist>${escape(item.artist)}</upnp:artist><dc:creator>${escape(item.artist)}</dc:creator><upnp:album>${escape(item.album)}</upnp:album>${item.art ? `<upnp:albumArtURI dlna:profileID="JPEG_TN">${escape(item.art)}</upnp:albumArtURI>` : ''}<upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo="http-get:*:${item.mime}:${item.dsd ? '*' : 'DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000'}" duration="${clock(item.duration)}.000">${escape(item.url)}</res></item></DIDL-Lite>`;
+    return `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/"><item id="${escape(item.id)}" parentID="0" restricted="1"><dc:title>${escape(item.title)}</dc:title><upnp:artist>${escape(item.artist)}</upnp:artist><dc:creator>${escape(item.artist)}</dc:creator><upnp:album>${escape(item.album)}</upnp:album>${item.art ? `<upnp:albumArtURI dlna:profileID="JPEG_TN">${escape(item.art)}</upnp:albumArtURI>` : ''}<upnp:class>object.item.audioItem.musicTrack</upnp:class><res protocolInfo="http-get:*:${item.mime}:${item.dsd ? '*' : 'DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000'}" duration="${clock(item.duration)}.000"${resAudio(item)}>${escape(item.url)}</res></item></DIDL-Lite>`;
   },
   async load(renderer, item) {
     const uri = { InstanceID:0, CurrentURI:item.url, CurrentURIMetaData:upnp.didl(item) };
