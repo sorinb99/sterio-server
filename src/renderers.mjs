@@ -316,21 +316,25 @@ function itemFor(device, track, value, control, base) {
   return { url:base + value.path.replace('?', `.${extension}?`), stream:value.path.split('?')[0], segment, format, id:track.id, title:track.title, artist:track.artist, album:track.album, art, mime:mimeFor(format, control.sink), dsd:/^(dsf|dff)$/i.test(String(format.container)),
     duration:segment ? (segment.endSeconds || track.durationMs / 1000) - segment.startSeconds : (track.durationMs || 0) / 1000 };
 }
+// The app's Native DSD to streamers setting (play request's dsd): DSF to a
+// DLNA streamer even when it lists no DSD format (the Eversolo T8).
+const sessionControl = session => session.nativeDsd && session.renderer.kind === 'upnp' ? { ...session.renderer.control, dsd:true } : session.renderer.control;
 async function deliver(session, index, epoch) {
   const track = getTrack(session.queue[index]); if (!track) throw new HttpError(404,'Track not found');
   const renderer = session.renderer, device = deviceFor(renderer);
   if (!renderer.stream_base) throw new HttpError(409,'Start playback from the app while it is connected to the server\'s local address, so the streamer knows where to fetch audio.');
-  const value = await resolveFor(device, track, renderer.control);
+  const control = sessionControl(session);
+  const value = await resolveFor(device, track, control);
   if (value.mode !== 'original') {
     for (const started = Date.now(); ;) {
       if (epoch !== session.epoch) return null;
-      const ready = await prepareDelivery(track, deliveryInput(track, renderer.control));
+      const ready = await prepareDelivery(track, deliveryInput(track, control));
       if (ready.body?.ready) break;
       if (Date.now() - started > 30 * 60000) throw new HttpError(504,'The server conversion took too long');
       await sleep(Math.max(200, Math.min(5000, ready.body?.retryAfterMs || 1000)));
     }
   }
-  return { index, ...itemFor(device, track, value, renderer.control, renderer.stream_base) };
+  return { index, ...itemFor(device, track, value, control, renderer.stream_base) };
 }
 // A streamer the server cannot reach (on the listener's own network, another
 // site): the app controls it and asks here for each track's public stream URL.
@@ -454,7 +458,7 @@ export async function playOnRenderer(device, id, input, base) {
   if (!Number.isInteger(input.index) || input.index < 0 || input.index >= queue.length) throw new HttpError(400,'Invalid track index');
   const previous = sessions.get(id);
   if (previous) { previous.epoch++; report(previous,'stop'); }
-  const session = { renderer, queue, index:input.index, version:++queueVersion, epoch:0, status:'buffering', position:0, duration:0, volume:previous?.volume ?? null, failures:0, controller:device.name, current:null, next:null, pendingSeek:null };
+  const session = { renderer, queue, index:input.index, version:++queueVersion, epoch:0, status:'buffering', position:0, duration:0, volume:previous?.volume ?? null, nativeDsd:input.dsd === true, failures:0, controller:device.name, current:null, next:null, pendingSeek:null };
   sessions.set(id, session);
   const offset = Number.isFinite(input.position) && input.position > 0 && input.position < 604800 ? input.position : 0;
   await start(session, offset);

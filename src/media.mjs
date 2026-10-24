@@ -4,6 +4,7 @@ import { stat, readdir, unlink, rename, statfs, utimes, open } from 'node:fs/pro
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import path from 'node:path';
+import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { config } from './config.mjs';
 import { cacheDir, musicPath, getTrack } from './library.mjs';
@@ -11,7 +12,7 @@ import { hash } from './db.mjs';
 import { HttpError } from './auth.mjs';
 import { load } from './load.mjs';
 import { verbatimLayout, verbatimFrame, verbatimBlock, verbatimBits } from './verbatim.mjs';
-import { sacdDsf, sendSacd, writeSacdDff } from './sacd.mjs';
+import { sacdDsf, sendSacd, writeSacdDff, sacdPart } from './sacd.mjs';
 const conversionErrors = new Map();
 // Linked DSD → PCM conversions a streamer may play while they run: the
 // original comes over the internet, so waiting for the whole file can take
@@ -108,21 +109,26 @@ function resampler() {
 }
 // SACD tracks reach FFmpeg as a DSF stream on its input (plain DSD) or as a
 // DSDIFF file written for this conversion and removed after it (DST).
-async function sacdInput(track) {
+// part: a piece of the track (sacdPart), for conversions in parts.
+async function sacdInput(track, part = track.sacd) {
   const image = await musicPath(track.sacd.image);
-  if (!track.sacd.dst) {
+  if (!part.dst) {
     let input;
     return { source:'pipe:0', options:['-protocol_whitelist','pipe','-f','dsf'], stdin:'pipe',
-      feed: child => { input = Readable.from(sacdDsf(image, track.sacd)); input.on('error', () => child.kill('SIGKILL')); child.stdin.on('error', () => {}); child.on('close', () => input.destroy()); input.pipe(child.stdin); },
+      feed: child => { input = Readable.from(sacdDsf(image, part)); input.on('error', () => child.kill('SIGKILL')); child.stdin.on('error', () => {}); child.on('close', () => input.destroy()); input.pipe(child.stdin); },
       cleanup: async () => { input?.destroy(); } };
   }
-  const file = await writeSacdDff(image, track.sacd, cacheDir);
+  const file = await writeSacdDff(image, part, cacheDir);
   return { source:file, options:['-protocol_whitelist','file'], stdin:'ignore', feed: () => {}, cleanup: () => unlink(file).catch(() => {}) };
 }
 const inputOptions = (source, sourceUrl) => sourceUrl ? ['-protocol_whitelist','file,http,https,tcp,tls,crypto','-reconnect','1','-reconnect_on_network_error','1','-reconnect_delay_max','10','-rw_timeout','30000000',...(source.startsWith('https:') && caFile ? ['-ca_file',caFile] : [])] : ['-protocol_whitelist','file'];
 // sourceUrl: a linked server's original, read over HTTP by FFmpeg.
 async function convert(track, destination, mode = 'pcm', sourceUrl) {
-  const queued = Date.now(), name = track.path ? path.basename(track.path) : track.title;
+  const name = track.path ? path.basename(track.path) : track.title;
+  // A SACD track is decoded once, in parts on all cores (convertVerbatim); the
+  // compressed copy is that file packed again, without decoding DSD twice.
+  const packed = mode === 'pcm' && !sourceUrl && track.sacd ? await sacdVerbatim(track) : null;
+  const queued = Date.now();
   await slot();
   const started = Date.now();
   console.log(`Conversion start: ${mode} "${name}" waited ${started - queued} ms (active ${active}, queued ${waiting.length})`);
@@ -131,10 +137,10 @@ async function convert(track, destination, mode = 'pcm', sourceUrl) {
   try {
     const available = await statfs(cacheDir);
     if (available.bavail * available.bsize < 256 * 1024 * 1024) throw new HttpError(507, 'Not enough free space in the server data volume');
-    if (!sourceUrl && track.sacd) sacd = await sacdInput(track);
-    let source = sourceUrl ? await sourceUrl() : sacd ? sacd.source : await musicPath(track.path);
-    let reframePcm = false;
-    if (mode === 'pcm' && !sourceUrl && !sacd) {
+    if (!sourceUrl && track.sacd && !packed) sacd = await sacdInput(track);
+    let source = packed || (sourceUrl ? await sourceUrl() : sacd ? sacd.source : await musicPath(track.path));
+    let reframePcm = !!packed;
+    if (mode === 'pcm' && !sourceUrl && !sacd && !packed) {
       const legacy = legacyPcmCacheName(track);
       reframePcm = await stat(legacy).then(info => info.isFile()).catch(() => false);
       if (reframePcm) source = legacy;
@@ -228,6 +234,22 @@ async function verbatimSamples(track, rate, file) {
   }
   return Math.round((track.durationMs || 0) / 1000 * rate);
 }
+// Parts of at least half a minute, one per core but one (the server's own).
+const sacdParts = seconds => Math.max(1, Math.min(8, os.availableParallelism() - 1, Math.floor(seconds / 30)));
+// The finished verbatim file of a SACD track, made if needed; null when it
+// cannot be made, and the caller converts the track itself.
+async function sacdVerbatim(track) {
+  const file = cacheName(track, 'verbatim');
+  try {
+    if (await prepareJob(file, () => convertVerbatim(track, file), 0)) return file;
+    await pending.get(file);
+    await stat(file);
+    return file;
+  } catch (error) {
+    console.warn(`SACD verbatim copy unavailable, converting directly: ${error.message}`);
+    return null;
+  }
+}
 const notify = state => { for (const wake of state.waiters) wake(); state.waiters.clear(); };
 const changed = (state, ms) => new Promise(resolve => { const timer = setTimeout(resolve, ms); state.waiters.add(() => { clearTimeout(timer); resolve(); }); });
 // DSD → PCM ('verbatim') or a CUE chapter cut from its image ('cueverbatim'),
@@ -240,10 +262,12 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
   console.log(`Conversion start: ${mode} "${name}" waited ${started - queued} ms (active ${active}, queued ${waiting.length})`);
   const temp = destination + '.' + randomBytes(8).toString('hex') + '.part';
   const state = { temp, layout: null, written: 0, seconds: 0, done: false, failed: false, waiters: new Set() };
-  let handle, sacd = null;
+  let handle;
+  const inputs = [], children = new Set();
   try {
-    if (!sourceUrl && track.sacd) sacd = await sacdInput(track);
-    const source = sourceUrl ? await sourceUrl() : sacd ? sacd.source : await musicPath(track.path);
+    // A SACD track is cut into parts, one FFmpeg each, on the image's frames.
+    const parted = !sourceUrl && track.sacd && mode === 'verbatim';
+    const source = sourceUrl ? await sourceUrl() : parted ? null : await musicPath(track.path);
     let rate, channels, bits, samples, seek = [], length = [], filter;
     if (mode === 'cueverbatim') {
       // The same sample boundaries as the compressed chapter (see convert).
@@ -256,8 +280,10 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
       const format = deliveredFormat(track);
       rate = format.sampleRate; channels = format.channels; bits = 24;
       samples = await verbatimSamples(track, rate, sourceUrl ? null : source);
-      filter = `${await resampler()}:osr=${rate},aformat=sample_fmts=s32:channel_layouts=${channels === 1 ? 'mono' : 'stereo'},apad=whole_len=${samples},atrim=end_sample=${samples}`;
     }
+    const resample = mode === 'cueverbatim' ? '' : await resampler();
+    const pcmFilter = (from, to) => `${resample}:osr=${rate},aformat=sample_fmts=s32:channel_layouts=${channels === 1 ? 'mono' : 'stereo'},apad=whole_len=${to},atrim=start_sample=${from}:end_sample=${to}`;
+    if (mode !== 'cueverbatim') filter = pcmFilter(0, samples);
     if (!(samples > 0) || !bits) throw new HttpError(422, 'The track length is unknown, so it cannot be converted while playing.');
     const layout = verbatimLayout({ sampleRate: rate, channels, samples, bits });
     if (layout.size > config.cacheBytes) throw new HttpError(413, 'Converted track exceeds CACHE_MAX_MB. Increase the cache limit.');
@@ -268,42 +294,77 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
     state.layout = layout; state.written = layout.header.length;
     growing.set(destination, state);
     const raw = bits === 16 ? 's16le' : 's24le';
-    const child = spawn('ffmpeg', ['-v','error','-nostdin',...(sacd ? sacd.options : inputOptions(source, sourceUrl)),...seek,'-i',source,...length,'-map','0:a:0','-vn','-sn','-dn','-af',filter,'-c:a',`pcm_${raw}`,'-f',raw,'pipe:1'], { stdio: [sacd ? sacd.stdin : 'ignore','pipe','pipe'] });
-    sacd?.feed(child);
-    let errorText = '';
-    child.stderr.on('data', chunk => { errorText = (errorText + chunk.toString()).replace(/ticket=[^\s&"']+/g,'ticket=…').slice(-1000); });
-    const exit = new Promise(resolve => { child.on('close', resolve); child.on('error', () => resolve(-1)); });
-    const timeout = setTimeout(() => child.kill('SIGKILL'), (sourceUrl ? 60 : 15) * 60 * 1000);
-    let index = 0, rest = Buffer.alloc(0);
     const frameInput = index => layout.frameSamples(index) * channels * layout.bytes;
-    const write = async data => {
+    // Parts finish in any order; the stream may read up to the first frame
+    // not written yet.
+    const finished = new Uint8Array(layout.frames);
+    let contiguous = 0, stopped = false;
+    const write = async (index, data) => {
       const frame = verbatimFrame(layout, index, data);
       await handle.write(frame, 0, frame.length, layout.offsets[index]);
-      index++; state.written = layout.offsets[index];
-      state.seconds = Math.min(samples, index * verbatimBlock) / rate;
+      finished[index] = 1;
+      while (contiguous < layout.frames && finished[contiguous]) contiguous++;
+      state.written = layout.offsets[contiguous];
+      state.seconds = Math.min(samples, contiguous * verbatimBlock) / rate;
       notify(state);
     };
-    let drained = false;
-    try {
-      for await (const chunk of child.stdout) {
-        rest = rest.length ? Buffer.concat([rest, chunk]) : chunk;
-        let at = 0;
-        for (let size; index < layout.frames && rest.length - at >= (size = frameInput(index)); at += size) await write(rest.subarray(at, at + size));
-        rest = rest.subarray(at);
+    // One FFmpeg writing frames [from, to).
+    const decode = async (from, to, input) => {
+      const child = spawn('ffmpeg', ['-v','error','-nostdin',...input.options,...input.seek,'-i',input.source,...input.length,'-map','0:a:0','-vn','-sn','-dn','-af',input.filter,'-c:a',`pcm_${raw}`,'-f',raw,'pipe:1'], { stdio: [input.stdin,'pipe','pipe'] });
+      children.add(child);
+      input.feed(child);
+      let errorText = '';
+      child.stderr.on('data', chunk => { errorText = (errorText + chunk.toString()).replace(/ticket=[^\s&"']+/g,'ticket=…').slice(-1000); });
+      const exit = new Promise(resolve => { child.on('close', resolve); child.on('error', () => resolve(-1)); });
+      const timeout = setTimeout(() => child.kill('SIGKILL'), (sourceUrl ? 60 : 15) * 60 * 1000);
+      let index = from, rest = Buffer.alloc(0), drained = false;
+      try {
+        for await (const chunk of child.stdout) {
+          rest = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+          let at = 0;
+          for (let size; index < to && rest.length - at >= (size = frameInput(index)); at += size, index++) await write(index, rest.subarray(at, at + size));
+          rest = rest.subarray(at);
+        }
+        drained = true;
+      } finally {
+        clearTimeout(timeout);
+        // A failed write leaves FFmpeg decoding into a pipe nobody reads.
+        if (!drained && child.exitCode === null) child.kill('SIGKILL');
+        children.delete(child);
       }
-      drained = true;
-    } finally {
-      clearTimeout(timeout);
-      // A failed write leaves FFmpeg decoding into a pipe nobody reads.
-      if (!drained && child.exitCode === null) child.kill('SIGKILL');
-    }
-    const code = await exit;
-    if (code !== 0) {
-      console.warn(`Audio conversion failed after ${Date.now() - started} ms: ${mode} "${name}"`, errorText);
-      throw new HttpError(422, 'Audio conversion failed. Check the server log and file codec.');
-    }
-    // The length is fixed in the header: silence covers any shortfall.
-    while (index < layout.frames) await write(Buffer.alloc(frameInput(index)));
+      const code = await exit;
+      if (code !== 0) {
+        if (!stopped) console.warn(`Audio conversion failed after ${Date.now() - started} ms: ${mode} "${name}"`, errorText);
+        throw new HttpError(422, 'Audio conversion failed. Check the server log and file codec.');
+      }
+      // The length is fixed in the header: silence covers any shortfall.
+      for (; index < to; index++) await write(index, Buffer.alloc(frameInput(index)));
+    };
+    const jobs = [];
+    if (parted) {
+      // Each part starts a second early and ends a second late, so the DSD
+      // decoder and the resampler are settled at its edges; every part keeps
+      // exactly its own samples. A SACD frame is 1/75 s.
+      const s = track.sacd, perFrame = rate / 75, image = await musicPath(s.image);
+      const count = sacdParts(samples / rate), step = Math.ceil(layout.frames / count);
+      for (let from = 0; from < layout.frames; from += step) {
+        const to = Math.min(layout.frames, from + step), first = from * verbatimBlock, last = Math.min(samples, to * verbatimBlock);
+        const begin = Math.max(0, Math.min(s.frames - 1, Math.floor(first / perFrame) - (from ? 75 : 0)));
+        const end = Math.min(s.frames, Math.max(begin + 1, Math.ceil(last / perFrame) + 75));
+        const input = await sacdInput(track, await sacdPart(image, s, begin, end - begin));
+        inputs.push(input);
+        const offset = first - begin * perFrame;
+        jobs.push([from, to, { ...input, seek: [], length: [], filter: pcmFilter(offset, offset + last - first) }]);
+      }
+      if (count > 1) console.log(`Conversion parts: ${mode} "${name}" ${jobs.length} at once`);
+    } else jobs.push([0, layout.frames, { options: inputOptions(source, sourceUrl), source, stdin: 'ignore', feed: () => {}, seek, length, filter }]);
+    const results = await Promise.allSettled(jobs.map(([from, to, input]) => decode(from, to, input).catch(error => {
+      stopped = true;
+      for (const child of children) child.kill('SIGKILL');
+      throw error;
+    })));
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
     await handle.close(); handle = null;
     await rename(temp, destination);
     state.done = true; notify(state);
@@ -313,7 +374,8 @@ async function convertVerbatim(track, destination, sourceUrl, mode = 'verbatim')
   } finally {
     if (!state.done) { state.failed = true; notify(state); }
     if (growing.get(destination) === state) growing.delete(destination);
-    await sacd?.cleanup();
+    for (const child of children) child.kill('SIGKILL');
+    for (const input of inputs) await input.cleanup();
     await handle?.close().catch(() => {});
     await unlink(temp).catch(() => {}); release();
   }

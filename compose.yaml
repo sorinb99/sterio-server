@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: sterio-server:0.2.12
+    image: sterio-server:0.2.13
     build: .
     container_name: sterio
     restart: unless-stopped

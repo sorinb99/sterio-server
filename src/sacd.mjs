@@ -190,6 +190,16 @@ async function seekSector(handle, s, first) {
   }
   return lo;
 }
+// Frames [first, first + frames) of a track as a track of their own, read
+// from the sector they start in: a conversion splits a track into parts it
+// decodes at the same time (media.mjs).
+export async function sacdPart(file, s, first, frames) {
+  const handle = await open(file, 'r');
+  try {
+    const lsn = await seekSector(handle, s, first) ?? s.lsn;
+    return { ...s, start: s.start + first, frames, lsn, length: s.lsn + s.length - lsn };
+  } finally { await handle.close(); }
+}
 
 // Plain DSD as DSF: a 92-byte header, then per 4096-byte block of each
 // channel in turn, bits least significant first. The size follows from the

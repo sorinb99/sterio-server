@@ -62,6 +62,15 @@ date, genre Uncategorized. Covers come from the image's folder (`front.jpg`,
   (leftovers older than a day go in `pruneCache`). The PCM result is a normal
   conversion, like any DSD file's. DST tracks are not shared with linked
   servers, which ask for originals.
+- **Conversions run in parts**: a track is cut into parts of 30 s or more,
+  one per core but one (at most 8), each its own track of image frames
+  (`sacdPart`, from the sector its first frame starts in) with its own DSF
+  stream or DSDIFF file and FFmpeg. A part decodes a second (75 frames) before
+  and after its edges and keeps exactly its own samples, so the joined file is
+  identical to one FFmpeg's. The verbatim file can stream while parts finish
+  in any order: readers get bytes up to the first frame not written yet. The
+  compressed PCM copy (streamers) packs the finished verbatim file again
+  instead of decoding the DSD a second time.
 - Every SACD track's format carries `image: 'iso'` (also in album
   `formats`); the apps show "DSD ISO" and "SACD ISO". Tracks indexed by
   0.2.10 are read again once to get it.
