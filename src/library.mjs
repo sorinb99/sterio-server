@@ -163,7 +163,9 @@ export async function scanLibrary() {
     for(const relative of isoFiles.sort()) {
       try {
         const info=await stat(await musicPath(relative)), known=byImage.get(relative)||[];
-        if(known.length && known.every(row=>row.size===info.size && row.mtime===info.mtimeMs)) { for(const row of known) { seen.add(row.id); scanStatus.scanned++; } continue; }
+        // Tracks indexed before 0.2.11 lack format.image and are read again.
+        const current=known.length && known.every(row=>row.size===info.size && row.mtime===info.mtimeMs) && JSON.parse(db.prepare('SELECT metadata FROM tracks WHERE id=?').get(known[0].id).metadata).format?.image==='iso';
+        if(current) { for(const row of known) { seen.add(row.id); scanStatus.scanned++; } continue; }
         const items=sacdTracks(relative,await readSacd(await musicPath(relative)),info.size,info.mtimeMs,hash);
         if(!items.length) throw new Error('No stereo area');
         for(const item of items) { seen.add(item.id); scanStatus.scanned++; insert.run(item.id,item.path,info.size,info.mtimeMs,JSON.stringify(item)); }
@@ -510,7 +512,7 @@ export function trackViews() { return cached('trackViews',()=>ordered(albumTrack
 // Favorites of every device in the listener's profile.
 export function favorites(deviceId) { movedTrackIds(); const devices = profileDevices(deviceId); return new Set(db.prepare(`SELECT item_id FROM favorites WHERE device_id IN (${marks(devices)})`).all(...devices).map(row => row.item_id)); }
 export function trackView(item, favoriteIds) {
-  const { path: _, id, albumArtist, artistId, genres, genreIds, dsd, sourceId, cuePath, cueTitle, splitOf, splitSource, remote, ...visible } = item;
+  const { path: _, id, albumArtist, artistId, genres, genreIds, dsd, sourceId, cuePath, cueTitle, splitOf, splitSource, remote, sacd, ...visible } = item;
   delete visible.size; delete visible.mtime;
   return { ...visible, ...(remote ? { linkedServer: remote.name } : {}), albumImageTag:albumTag(item), ref: ref(id), favorite: favoriteIds.has(id) };
 }
@@ -526,7 +528,8 @@ function buildAlbumViews() {
   const formats=new Map();
   for(const track of tracks) {
     let values=formats.get(track.albumId); if(!values) formats.set(track.albumId,values=new Map());
-    if(track.format) values.set(`${track.format.codec}:${track.format.container}`,{codec:track.format.codec,container:track.format.container});
+    // image: 'iso' marks tracks played from a SACD image, shown as such in the apps.
+    if(track.format) values.set(`${track.format.codec}:${track.format.container}:${track.format.image||''}`,{codec:track.format.codec,container:track.format.container,...(track.format.image?{image:track.format.image}:{})});
   }
   for(const album of groups.values()) album.formats=[...(formats.get(album.ref.itemId)?.values() || [])];
   for(const track of cueTracks()) { const album=groups.get(track.albumId); if(album) album.cueTrackCount=(album.cueTrackCount||0)+1; }

@@ -113,7 +113,7 @@ export function sacdTracks(relative, info, size, mtime, hash) {
     title: track.title || `Track ${track.number}`, artist: track.performer || albumArtist, albumArtist, album, albumId,
     artistId: hash(`artist\0${albumArtist}`), genres: ['Uncategorized'], genreIds: [hash('genre\0Uncategorized')],
     durationMs: Math.round(track.frames / FPS * 1000), number: track.number, disc: info.disc, year: info.year,
-    format: { codec: area.dst ? 'dst' : 'dsd', container: area.dst ? 'iso' : 'dsf', sampleRate: area.rate, bitDepth: 1, channels: area.channels },
+    format: { codec: area.dst ? 'dst' : 'dsd', container: area.dst ? 'iso' : 'dsf', sampleRate: area.rate, bitDepth: 1, channels: area.channels, image: 'iso' },
     dsd: true,
     sacd: { image: relative, size, mtime, dst: area.dst, channels: area.channels, areaStart: area.start, areaEnd: area.end, lsn: track.lsn, length: track.length, start: track.start, frames: track.frames },
   }));

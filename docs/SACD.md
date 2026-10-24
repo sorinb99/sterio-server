@@ -62,6 +62,9 @@ date, genre Uncategorized. Covers come from the image's folder (`front.jpg`,
   (leftovers older than a day go in `pruneCache`). The PCM result is a normal
   conversion, like any DSD file's. DST tracks are not shared with linked
   servers, which ask for originals.
+- Every SACD track's format carries `image: 'iso'` (also in album
+  `formats`); the apps show "DSD ISO" and "SACD ISO". Tracks indexed by
+  0.2.10 are read again once to get it.
 - The apps route DSD with `needsDsdOutput`: DST tracks from an image need no
   DSD output and no DSD to PCM setting.
 
