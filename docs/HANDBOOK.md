@@ -152,7 +152,7 @@ family from the app's Library) and returns albums with any of them.
   protected build, then archives, signs and exports a pkg into
   `work/mac-server/` (the app bundles `build/src`, not `src`); upload with
   `xcodebuild -exportArchive … -exportOptionsPlist work/mac-server/app-store-export-upload.plist`.
-  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9), 0.2.1 (10).
+  Build numbers so far: 0.1.58 (6), 0.1.61 (7), 0.1.62 (8), 0.2.0 (9), 0.2.1 (10), …, 0.2.14 (15), 0.2.17 (16). Public TestFlight link: https://testflight.apple.com/join/mPHZH6uR.
 - TestFlight via the App Store Connect API: key `62BSTYTAWV` (App Manager) in
   `~/.appstoreconnect/private_keys/` (never read or print it).
   `node work/testflight-expire.mjs` lists the app's 1.x and the server's 0.1.x
