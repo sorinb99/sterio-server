@@ -1,0 +1,11 @@
+// Sterio Server usage stats (see src/index.js). Deploy: npx wrangler@4 deploy
+{
+  "name": "sterio-stats",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "sterio-stats", "database_id": "ac0a6f19-0011-4b40-b212-98d0cd0a7c42" }
+  ]
+}

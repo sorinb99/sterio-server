@@ -41,6 +41,7 @@ Two ways to run it, same code:
 | `CACHE_MAX_DAYS` | 30 | Conversions unused this long are deleted |
 | `TRANSCODE_WORKERS` | cores − 1, max 4 | Parallel conversions for playback |
 | `SPLIT_WORKERS` | all cores (NAS), half the cores (Mac) | Parallel CUE chapter encodes, at nice 10 (falls back to normal priority if `nice` can't start) |
+| `TELEMETRY` | unset | Daily usage ping (`telemetry.mjs`): unset, the dashboard asks once; `true`/`false` answers for good and locks the dashboard switch |
 | `RENDERER_BASE_URL`, `TLS_CERT_FILE`, `TLS_KEY_FILE`, `BASE_PATH`, `ADMIN_*` | | See README |
 
 The Mac launcher sets its own environment (data in
@@ -72,6 +73,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 |---|---|
 | `index.mjs` | HTTP server, routing, `/v1/info` (version string lives here too), timers, shutdown |
 | `license.mjs` | Beta expiry: `scripts/build.mjs` writes a date 90 days after the build into the code (esbuild `define` of `process.env.STERIO_BETA_EXPIRES`); from then on every `/v1` route but `info` answers 403 `beta_expired` ("This Sterio Server beta expired on … Install the latest Sterio Server"), the Play on socket is refused, and the dashboard says so. `/healthz` and `/v1/info` (`betaExpires`) still answer. Running from `src/` never expires unless that variable is set. Both the Docker image and the Mac app carry it; the paid licence (phase 2) replaces it at release |
+| `telemetry.mjs` | Opt-in usage stats. The dashboard asks once ("Can your server say hi once a day?", `#telemetry-ask`; Escape = no) and keeps a switch at the bottom (`POST /api/telemetry`, setting `telemetry` on/off; `TELEMETRY` in `.env` wins). With a yes, a protected build POSTs `{id, version, platform, arch}` to `https://sterio-stats.sorinb99.workers.dev/v1/heartbeat` 10 min after start, then daily, and once at the moment of the yes. `id` is a random 128-bit `telemetryId` setting, not the server id; platform is `docker` (`/.dockerenv`), `mac` (`STERIO_MAC_SETTINGS`) or `other`. Running from `src/` never sends |
 | `auth.mjs` | Device keys (P-256), pairing codes, challenge → session, rate `limit()`, `HttpError` |
 | `requests.mjs` | Connection requests (in memory) accepted on the dashboard or in the app; `requestListeners` tell `socket.mjs`, which pushes the new list to admin devices; `connectView` adds `connectionRequests` for admins so the apps can notify |
 | `library.mjs` | Scan, metadata (ffprobe), CUE chapters, split folders, views (albums, artists, genres), `favorites()` per profile. `getTrack(id)` returns a file in its library form (`browsingForm`): a split track carries the image's album id, name, artist and cover, so now playing, playlists, Play on and streamers show the right artwork. Multi-disc albums (`discForm`, at browsing time, no rescan): tracks in a disc folder join one album with the lowest disc's id, titled without the disc marker (`withoutDisc`: "X CD1", "X (Disc 2)", "X (Deluxe, CD1)"), each keeping its disc (the tag, or the folder's number when the tag says 1). A folder named only by its disc (`CD 1`, `Disc 2`, `CD 02 - Covers`; the rest becomes `discTitle`) belongs to its parent album whatever the tags say; one that only ends with a disc number (`Album (Deluxe) CD 2`) joins discs with the same title. `CD1 - 2001 - Album` (a box of albums) stays apart. Albums without an ALBUMARTIST tag (compilations, soundtracks: one album per track artist otherwise) are joined the same way: tracks in one folder with one album title are one album, whose artist is the one the title names ("Eminem Presents: …"), else the one with most tracks, else Various Artists (`albumGroups`). Album covers: the first disc's folder, then the album folder, each with its front picture, then an artwork subfolder (Covers, Artwork, Art, Scans, Images, Booklet, Сканы…); artwork tag `front-v4` |
@@ -114,7 +116,7 @@ family from the app's Library) and returns albums with any of them.
 - Version: `package.json`, `compose.yaml` (`image:`) and `src/index.mjs`
   (`/v1/info`) — change all three together. Same rules as the app
   (`../sterio/docs/VERSIONING.md`): PATCH for fixes, MINOR for a feature or a
-  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.15 is the current version.
+  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.16 is the current version.
 - **Protected build (`scripts/build.mjs`).** The shipped server never contains
   source. `node scripts/build.mjs` bundles `src/` with esbuild (ESM, split
   chunks, `packages: 'external'` so Node built-ins stay) and obfuscates every
@@ -155,6 +157,17 @@ family from the app's Library) and returns albums with any of them.
   `~/.appstoreconnect/private_keys/` (never read or print it).
   `node work/testflight-expire.mjs` lists the app's 1.x and the server's 0.1.x
   builds still active; `--expire` expires them (can't be undone; ask first).
+
+## Usage stats (`cloud/stats/`)
+
+A Cloudflare Worker (`sterio-stats`, account sorinb99@gmail.com, free plan) with a
+D1 database `sterio-stats` (`schema.sql`: `installs` one row per install with
+first/last day, version, platform, arch; `days` one row per install per day).
+It only accepts `POST /v1/heartbeat` with a valid body and keeps no IP; there
+is no read endpoint. `cloud/stats/report.sh` prints active servers (today, 7,
+30 days, ever), versions/platforms and new servers per day. Deploy with
+`npx wrangler@4 deploy` in `cloud/stats` (wrangler is logged in with OAuth on
+this Mac; never handle tokens). Not part of the Docker image (`.dockerignore`).
 
 ## Rules
 

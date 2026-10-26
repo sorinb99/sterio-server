@@ -23,6 +23,7 @@ import { HttpError, limit, pairDevice, challengeDevice, createSession, authentic
 import { scanLibrary, scanStatus, scanWhenDue, albumTracks, albumViews, groupViews, page, catalogHas, getTrack, favorites, trackView, trackViews, formatFamilies, formatFamily, idsWithFormat } from './library.mjs';
 import { deliveredFormat, streamLinkedConversion, streamTrack, pruneCache } from './media.mjs';
 import { betaExpires, betaExpiresDay, requireActiveBeta } from './license.mjs';
+import { startTelemetry } from './telemetry.mjs';
 // Large answers (album pages, search) are compressed for apps away from home.
 const json = (res, status, body) => {
   const text = JSON.stringify(body);
@@ -57,7 +58,7 @@ async function handler(req,res) {
     const method = req.method;
     if (method === 'GET' && route === '/healthz') return json(res,200,{status:'ok',load:loadStats()});
     if (method === 'GET' && route === '/') return json(res,200,{name:'Sterio Server',message:'Connect with the Sterio app. Generate a pairing code using the NAS command line.',api:config.basePath+'/v1/info'});
-    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.15',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
+    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.16',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
     // An expired beta still answers info and health, so the app can say why.
     requireActiveBeta();
     // Only the address is needed: an administrator accepts the request on this server.
@@ -248,6 +249,7 @@ server.listen(config.port,config.host,() => {
   void migrateSplitFolders().catch(error => console.warn('Split folders:', error.message)).finally(() => scanLibrary());
 });
 const adminServer = startAdmin();
+startTelemetry();
 const scanTimer = setInterval(scanWhenDue,60000);
 const pruneTimer = setInterval(() => void pruneCache().catch(error => console.warn('Cache cleanup:',error.message)),300000);
 function shutdown(code = 0) { closeSockets(); adminServer?.close(); clearInterval(scanTimer); clearInterval(pruneTimer); server.close(() => { db.close(); process.exit(code); }); server.closeIdleConnections(); adminServer?.closeIdleConnections(); setTimeout(() => process.exit(code),10000).unref(); }

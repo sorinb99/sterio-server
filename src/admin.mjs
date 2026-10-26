@@ -16,6 +16,7 @@ import { connectPeer, createShareKey, peerSummary, removePeer, removePeerClient,
 import { addRenderer, controlRenderer, discoverRenderers, listRenderers, noteLan, removeRenderer } from './renderers.mjs';
 import { allowThroughFirewall, chooseMusicFolder, macStatus } from './mac.mjs';
 import { betaExpired, betaExpiresDay } from './license.mjs';
+import { setTelemetry, telemetryState } from './telemetry.mjs';
 const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 let summaryCache, summaryAt=0;
 function librarySummary() {
@@ -90,7 +91,7 @@ export function startAdmin() {
       if(req.method==='POST' && route==='/api/listener') {setListener(await input(req));return json(res,200,{ok:true});}
       if(req.method==='GET' && route==='/api/status') {
         const files=db.prepare('SELECT count(*) AS count,coalesce(sum(size),0) AS bytes FROM tracks').get();
-        return json(res,200,{name:config.name,version,betaExpires:betaExpiresDay,betaExpired:betaExpired(),uptime:Math.floor(process.uptime()),memory:process.memoryUsage().rss,files:files.count,bytes:files.bytes,...librarySummary(),devices:db.prepare('SELECT count(*) AS n FROM devices WHERE revoked=0 AND length(public_key)>0').get().n,scan:{...scanStatus,intervalMinutes:scanIntervalMinutes(),intervals:scanIntervals}});
+        return json(res,200,{name:config.name,version,betaExpires:betaExpiresDay,betaExpired:betaExpired(),telemetry:telemetryState(),uptime:Math.floor(process.uptime()),memory:process.memoryUsage().rss,files:files.count,bytes:files.bytes,...librarySummary(),devices:db.prepare('SELECT count(*) AS n FROM devices WHERE revoked=0 AND length(public_key)>0').get().n,scan:{...scanStatus,intervalMinutes:scanIntervalMinutes(),intervals:scanIntervals}});
       }
       if(req.method==='GET' && route==='/api/mac') return json(res,200,await macStatus());
       if(req.method==='POST' && route==='/api/mac/firewall') return json(res,200,await allowThroughFirewall());
@@ -119,6 +120,7 @@ export function startAdmin() {
       if(req.method==='POST' && route==='/api/split/start') return json(res,202,startSplit({force:(await input(req)).force===true}));
       if(req.method==='POST' && route==='/api/split/stop') return json(res,200,stopSplit());
       if(req.method==='POST' && route==='/api/scan') { if(!scanStatus.running) void scanLibrary().catch(error=>console.error('Admin scan:',error.message)); return json(res,202,{ok:true}); }
+      if(req.method==='POST' && route==='/api/telemetry') { setTelemetry((await input(req)).enabled===true); return json(res,200,telemetryState()); }
       if(req.method==='POST' && route==='/api/scan/interval') { if(!setScanInterval(Number((await input(req)).minutes))) throw new HttpError(400,'Choose one of the offered scan intervals.'); return json(res,200,{intervalMinutes:scanIntervalMinutes()}); }
       if(req.method==='POST' && route==='/api/key') {
         limit('admin-key:'+req.socket.remoteAddress,10);

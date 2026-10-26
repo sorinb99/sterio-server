@@ -8,6 +8,9 @@ const integer = (name, fallback, min, max) => {
 };
 export const config = {
   adminEnabled: process.env.ADMIN_ENABLED === 'true',
+  // Anonymous daily usage stats (telemetry.mjs): true or false answers the
+  // dashboard's question for good; unset, the dashboard asks.
+  telemetry: { true: true, false: false }[String(process.env.TELEMETRY || '').toLowerCase()],
   adminPort: integer('ADMIN_PORT', 7767, 1, 65535),
   adminBind: process.env.ADMIN_BIND_ADDRESS || '0.0.0.0',
   adminNetworks: (process.env.ADMIN_ALLOWED_NETWORKS || '').split(',').filter(Boolean),

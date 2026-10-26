@@ -80,3 +80,4 @@ footer{margin-top:34px;padding-top:18px;border-top:1px solid #292623;text-align:
 @media(max-width:850px){.listener-row{grid-template-columns:1fr 80px 130px 90px}}
 @media(max-width:700px){.listener-row{grid-template-columns:1fr 1fr}}
 #scan-interval{display:block;margin-top:8px;background:#141312;border:1px solid #45403A;color:#F4EEE4;border-radius:9px;padding:10px 12px;font-size:12px;height:40px;max-width:100%}
+#telemetry-row{display:flex;align-items:center;gap:10px;margin:30px 0 0}#telemetry-row input{display:inline;width:auto;margin:0;accent-color:#F0915A}#telemetry-ask{max-width:520px;width:calc(100% - 32px);background:#1E1C1A;color:#F4EEE4;border:1px solid #45403A;border-radius:20px;padding:30px}#telemetry-ask::backdrop{background:#0c0b0acc}#telemetry-ask .tool-buttons{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}

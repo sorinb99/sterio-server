@@ -169,6 +169,8 @@ docker compose pull
 docker compose up -d --no-build
 ```
 
+Usage stats: the first time you open the dashboard, it asks whether the server may say hi once a day. With a yes it sends a random id, the version and the platform (Docker or Mac, Intel or ARM); no IP address is kept and nothing about your music leaves your network. Change it at the bottom of the dashboard, or set `TELEMETRY=false` (or `true`) in `.env`.
+
 Beta builds stop serving music 90 days after they were built, like a TestFlight build. The dashboard shows the date ("Beta until …"); after it, the app says the beta expired. Install the latest image to keep listening: your data and settings stay in `/data`.
 
 ## 8. Manual verification

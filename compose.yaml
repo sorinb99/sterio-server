@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: ghcr.io/sorinb99/sterio-server:0.2.15
+    image: ghcr.io/sorinb99/sterio-server:0.2.16
     build: .
     container_name: sterio
     restart: unless-stopped
@@ -25,6 +25,7 @@ services:
       CACHE_MAX_DAYS: "${CACHE_MAX_DAYS:-30}"
       TRANSCODE_WORKERS: "${TRANSCODE_WORKERS:-}"
       SPLIT_WORKERS: "${SPLIT_WORKERS:-}"
+      TELEMETRY: "${TELEMETRY:-}"
     volumes:
       - "${MUSIC_PATH:?Set MUSIC_PATH in .env}:/music:${MUSIC_ACCESS:-ro}"
       - "${DATA_PATH:?Set DATA_PATH in .env}:/data"
