@@ -19,8 +19,19 @@ function joinGroups(joining, host) {
   db.prepare('UPDATE control_groups SET group_id=? WHERE group_id=?').run(to, from);
   db.prepare('INSERT INTO control_groups VALUES (?,?) ON CONFLICT(device_id) DO UPDATE SET group_id=excluded.group_id').run(from, to);
 }
-// Paired for Play on, or devices of the same listener (profile).
-export const related = (a, b) => group(a) === group(b) || sameProfile(a, b);
+// One listening circle: every device reachable through Play on links or shared
+// listener profiles (an iPad linked to the iPhone also sees the iPhone's Mac).
+function circle(id) {
+  const seen = new Set([id]), queue = [id];
+  while (queue.length) {
+    const current = queue.shift(), own = group(current);
+    const next = [own, ...db.prepare('SELECT device_id FROM control_groups WHERE group_id=?').all(own).map(row => row.device_id),
+      ...db.prepare('SELECT device_id FROM profile_devices WHERE profile_id=(SELECT profile_id FROM profile_devices WHERE device_id=?)').all(current).map(row => row.device_id)];
+    for (const item of next) if (!seen.has(item)) { seen.add(item); queue.push(item); }
+  }
+  return seen;
+}
+export const related = (a, b) => group(a) === group(b) || sameProfile(a, b) || circle(a).has(b);
 const validId = id => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id);
 function ids(value) {
   if (!Array.isArray(value) || value.length > 200 || value.some(id => !validId(id) || !getTrack(id))) throw new HttpError(400, 'Invalid playback queue (maximum 200 tracks)');
@@ -82,9 +93,7 @@ export function connectView(device) {
 }
 // Every other device paired with this one, online or not, so either side can unpair.
 function linkedDevices(device) {
-  const own = group(device.id);
-  const ids = new Set(db.prepare('SELECT device_id FROM control_groups WHERE group_id=?').all(own).map(row => row.device_id));
-  ids.add(own);
+  const ids = circle(device.id);
   ids.delete(device.id);
   return [...ids].map(id => db.prepare('SELECT id,name FROM devices WHERE id=? AND revoked=0').get(id)).filter(Boolean)
     .map(row => { const item = presence.get(row.id); return {id:row.id, name:online(item) ? item.name : row.name, platform:item?.platform || null, online:online(item)}; });
