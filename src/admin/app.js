@@ -17,7 +17,7 @@ async function refresh(silent=false) {
     $('scan').disabled=s.scan.running;$('scan').textContent=s.scan.running?'Scanning…':'Scan library';
     $('scan-state').textContent=s.scan.running?`${number(s.scan.scanned)} files checked · ${s.scan.errors} errors`:`${s.scan.lastFinished?'Last completed '+new Date(s.scan.lastFinished).toLocaleString():'Waiting for first scan'} · ${s.scan.errors} errors`;
     if(document.activeElement!==$('scan-interval'))$('scan-interval').value=String(s.scan.intervalMinutes);
-    $('system').textContent=`Server ${s.version} · ${number(s.files)} audio files · ${(s.bytes/1024**3).toFixed(1)} GB indexed · ${(s.memory/1024**2).toFixed(0)} MB memory · Uptime ${Math.floor(s.uptime/3600)}h ${Math.floor(s.uptime%3600/60)}m`;
+    $('system').textContent=`Server ${s.version}${s.betaExpires?(s.betaExpired?` · Beta expired ${s.betaExpires}, install the latest version`:` · Beta until ${s.betaExpires}`):''} · ${number(s.files)} audio files · ${(s.bytes/1024**3).toFixed(1)} GB indexed · ${(s.memory/1024**2).toFixed(0)} MB memory · Uptime ${Math.floor(s.uptime/3600)}h ${Math.floor(s.uptime%3600/60)}m`;
     await refreshLive();
     await refreshReport();
     await refreshSplit();

@@ -71,6 +71,7 @@ Tables (created with `CREATE TABLE IF NOT EXISTS` in the module that owns them):
 | File | Role |
 |---|---|
 | `index.mjs` | HTTP server, routing, `/v1/info` (version string lives here too), timers, shutdown |
+| `license.mjs` | Beta expiry: `scripts/build.mjs` writes a date 90 days after the build into the code (esbuild `define` of `process.env.STERIO_BETA_EXPIRES`); from then on every `/v1` route but `info` answers 403 `beta_expired` ("This Sterio Server beta expired on … Install the latest Sterio Server"), the Play on socket is refused, and the dashboard says so. `/healthz` and `/v1/info` (`betaExpires`) still answer. Running from `src/` never expires unless that variable is set. Both the Docker image and the Mac app carry it; the paid licence (phase 2) replaces it at release |
 | `auth.mjs` | Device keys (P-256), pairing codes, challenge → session, rate `limit()`, `HttpError` |
 | `requests.mjs` | Connection requests (in memory) accepted on the dashboard or in the app; `requestListeners` tell `socket.mjs`, which pushes the new list to admin devices; `connectView` adds `connectionRequests` for admins so the apps can notify |
 | `library.mjs` | Scan, metadata (ffprobe), CUE chapters, split folders, views (albums, artists, genres), `favorites()` per profile. `getTrack(id)` returns a file in its library form (`browsingForm`): a split track carries the image's album id, name, artist and cover, so now playing, playlists, Play on and streamers show the right artwork. Multi-disc albums (`discForm`, at browsing time, no rescan): tracks in a disc folder join one album with the lowest disc's id, titled without the disc marker (`withoutDisc`: "X CD1", "X (Disc 2)", "X (Deluxe, CD1)"), each keeping its disc (the tag, or the folder's number when the tag says 1). A folder named only by its disc (`CD 1`, `Disc 2`, `CD 02 - Covers`; the rest becomes `discTitle`) belongs to its parent album whatever the tags say; one that only ends with a disc number (`Album (Deluxe) CD 2`) joins discs with the same title. `CD1 - 2001 - Album` (a box of albums) stays apart. Albums without an ALBUMARTIST tag (compilations, soundtracks: one album per track artist otherwise) are joined the same way: tracks in one folder with one album title are one album, whose artist is the one the title names ("Eminem Presents: …"), else the one with most tracks, else Various Artists (`albumGroups`). Album covers: the first disc's folder, then the album folder, each with its front picture, then an artwork subfolder (Covers, Artwork, Art, Scans, Images, Booklet, Сканы…); artwork tag `front-v4` |
@@ -113,7 +114,7 @@ family from the app's Library) and returns albums with any of them.
 - Version: `package.json`, `compose.yaml` (`image:`) and `src/index.mjs`
   (`/v1/info`) — change all three together. Same rules as the app
   (`../sterio/docs/VERSIONING.md`): PATCH for fixes, MINOR for a feature or a
-  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.14 is the current version.
+  new API, 1.0 with the app's public release. 0.2.0 follows 0.1.62; 0.2.15 is the current version.
 - **Protected build (`scripts/build.mjs`).** The shipped server never contains
   source. `node scripts/build.mjs` bundles `src/` with esbuild (ESM, split
   chunks, `packages: 'external'` so Node built-ins stay) and obfuscates every
@@ -121,7 +122,7 @@ family from the app's Library) and returns albums with any of them.
   flow left intact so the stream and scan loops keep their speed), into
   `build/` — `build/src/*.mjs` (`index`, `cli`, `discovery-worker`,
   `healthcheck`, `chunks/`), `build/src/admin/` (minified dashboard) and a
-  trimmed `build/package.json`. The same relative layout as `src/`, so paths
+  trimmed `build/package.json`. It also fixes the beta expiry date (build day + 90, see `license.mjs`) and prints it. The same relative layout as `src/`, so paths
   the code opens (`../package.json`, `./admin/`, `../cacert.pem`,
   `./discovery-worker.mjs`) still resolve. `build/` is git-ignored. Edit and
   run from `src/`; `build/` is only for the Docker image and the Mac app.

@@ -193,6 +193,8 @@ To update: import the new archive, apply the `sterio-server:0.1.2` tag as needed
 docker compose up -d --no-build --force-recreate
 ```
 
+Beta builds stop serving music 90 days after they were built, like a TestFlight build. The dashboard shows the date ("Beta until …"); after it, the app says the beta expired. Install the latest image to keep listening: your data and settings stay in `/data`.
+
 ## 8. Manual verification
 
 These checks were not run automatically at this stage:

@@ -22,6 +22,7 @@ import { db, serverId, hash } from './db.mjs';
 import { HttpError, limit, pairDevice, challengeDevice, createSession, authenticate, verifyTicket } from './auth.mjs';
 import { scanLibrary, scanStatus, scanWhenDue, albumTracks, albumViews, groupViews, page, catalogHas, getTrack, favorites, trackView, trackViews, formatFamilies, formatFamily, idsWithFormat } from './library.mjs';
 import { deliveredFormat, streamLinkedConversion, streamTrack, pruneCache } from './media.mjs';
+import { betaExpires, betaExpiresDay, requireActiveBeta } from './license.mjs';
 // Large answers (album pages, search) are compressed for apps away from home.
 const json = (res, status, body) => {
   const text = JSON.stringify(body);
@@ -56,7 +57,9 @@ async function handler(req,res) {
     const method = req.method;
     if (method === 'GET' && route === '/healthz') return json(res,200,{status:'ok',load:loadStats()});
     if (method === 'GET' && route === '/') return json(res,200,{name:'Sterio Server',message:'Connect with the Sterio app. Generate a pairing code using the NAS command line.',api:config.basePath+'/v1/info'});
-    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.14',apiVersion:1,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
+    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.15',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
+    // An expired beta still answers info and health, so the app can say why.
+    requireActiveBeta();
     // Only the address is needed: an administrator accepts the request on this server.
     if (method === 'POST' && route === '/v1/auth/request') { limit('request:' + req.socket.remoteAddress,90); return json(res,200,requestAccess('device',await body(req),req.socket.remoteAddress)); }
     if (method === 'POST' && route.startsWith('/v1/auth/')) {
@@ -241,6 +244,7 @@ server.headersTimeout = 20000; server.requestTimeout = 30000; server.keepAliveTi
 server.listen(config.port,config.host,() => {
   console.log(`Sterio Server ${serverId} listening on ${config.tlsCert ? 'https' : 'http'}://${config.host}:${config.port}${config.basePath}`);
   console.log('Generate a pairing code: node src/cli.mjs pair');
+  if (betaExpires) console.log(`Beta build: serves music until ${betaExpiresDay}`);
   void migrateSplitFolders().catch(error => console.warn('Split folders:', error.message)).finally(() => scanLibrary());
 });
 const adminServer = startAdmin();

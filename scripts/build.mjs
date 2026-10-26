@@ -10,9 +10,11 @@ import JavaScriptObfuscator from 'javascript-obfuscator';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..'), out = path.join(root, 'build');
+// Every beta build stops serving 90 days after it is made (src/license.mjs).
+const expires = new Date(Date.now() + 90 * 86400000).toISOString();
 await rm(out, { recursive: true, force: true });
 await build({
-  absWorkingDir: root,
+  absWorkingDir: root, define: { 'process.env.STERIO_BETA_EXPIRES': JSON.stringify(expires) },
   entryPoints: ['src/index.mjs', 'src/cli.mjs', 'src/discovery-worker.mjs', 'src/healthcheck.mjs'],
   outdir: 'build/src', outExtension: { '.js': '.mjs' }, chunkNames: 'chunk-[hash]',
   bundle: true, splitting: true, format: 'esm', platform: 'node', target: 'node24',
@@ -47,4 +49,4 @@ for (const name of ['index.html', 'style.css']) await cp(path.join(root, 'src', 
 await build({ absWorkingDir: root, entryPoints: ['src/admin/app.js'], outfile: 'build/src/admin/app.js', minify: true, legalComments: 'none', format: 'iife', target: 'es2020', logLevel: 'warning' });
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 await writeFile(path.join(out, 'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, private: true, type: 'module' }) + '\n');
-console.log(`Protected build ${pkg.version} in build/`);
+console.log(`Protected build ${pkg.version} in build/, beta until ${expires.slice(0, 10)}`);

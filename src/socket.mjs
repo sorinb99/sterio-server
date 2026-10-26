@@ -5,6 +5,7 @@ import { connectView, pulse, related, sendCommand } from './connect.mjs';
 import { requestListeners } from './requests.mjs';
 import { updateDeviceNickname } from './reporting.mjs';
 import { load } from './load.mjs';
+import { betaExpired } from './license.mjs';
 
 // Play on between a phone and a linked Mac over one WebSocket each: a command
 // reaches the Mac and the Mac's new state reaches the phone as soon as they
@@ -112,7 +113,7 @@ function receive(client, chunk) {
 export function acceptSocket(req, socket, basePath) {
   const path = new URL(req.url, 'http://localhost').pathname;
   const key = req.headers['sec-websocket-key'];
-  if (path !== basePath + '/v1/connect/socket' || req.headers.upgrade?.toLowerCase() !== 'websocket' || typeof key !== 'string' || sockets.size >= 512) {
+  if (path !== basePath + '/v1/connect/socket' || req.headers.upgrade?.toLowerCase() !== 'websocket' || typeof key !== 'string' || sockets.size >= 512 || betaExpired()) {
     socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); return;
   }
   const accept = createHash('sha1').update(key + GUID).digest('base64');
