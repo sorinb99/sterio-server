@@ -20,6 +20,20 @@ ADMIN_ALLOWED_HOSTS=192.168.50.90:7767,127.0.0.1:7767,localhost:7767
 
 The Docker port is bound to the NAS LAN IP. The dedicated listener checks the actual peer address against the allowed LAN CIDR; it does not trust proxy headers. Only configured Host values are accepted. All changes require the exact same origin and a JSON request body.
 
+### Docker Desktop on a Mac
+
+Docker Desktop runs the container in a VM, so the browser's connection never arrives from 127.0.0.1. With the dashboard port published on 127.0.0.1, it arrives from the compose network gateway (a 172.16–31.x address, such as 172.19.0.1). The app port published on 0.0.0.0 sees 192.168.65.1 instead. Allow both:
+
+```dotenv
+ADMIN_ENABLED=true
+ADMIN_BIND_IP=127.0.0.1
+ADMIN_HOST_PORT=7767
+ADMIN_ALLOWED_NETWORKS=192.168.65.0/24,172.16.0.0/12
+ADMIN_ALLOWED_HOSTS=127.0.0.1:7767,localhost:7767
+```
+
+Only the Mac itself can reach the port bound to 127.0.0.1. Open http://localhost:7767. A 403 "Local network access only" means the peer address is outside these ranges. `docker exec sterio cat /proc/net/tcp` shows it in hex.
+
 **Do not forward port 7767 in the router or add it to the public reverse proxy.** The existing public app API stays on port 7766; it does not serve the admin interface. This LAN dashboard uses HTTP, so use it on your trusted local network. Public API TLS configuration is unchanged.
 
 ## Manual checks
