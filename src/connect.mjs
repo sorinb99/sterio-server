@@ -11,6 +11,14 @@ CREATE TABLE IF NOT EXISTS control_invites (hash TEXT PRIMARY KEY, device_id TEX
 const presence = new Map(), commands = new Map();
 const group = id => db.prepare('SELECT group_id FROM control_groups WHERE device_id=?').get(id)?.group_id || id;
 const online = item => item && Date.now() - item.seen < 12000;
+// Linking joins two groups whole, so any number of devices (Macs, iPhones,
+// iPads, Android) end up in one group and all see and control each other.
+function joinGroups(joining, host) {
+  const from = group(joining), to = group(host);
+  if (from === to) return;
+  db.prepare('UPDATE control_groups SET group_id=? WHERE group_id=?').run(to, from);
+  db.prepare('INSERT INTO control_groups VALUES (?,?) ON CONFLICT(device_id) DO UPDATE SET group_id=excluded.group_id').run(from, to);
+}
 // Paired for Play on, or devices of the same listener (profile).
 export const related = (a, b) => group(a) === group(b) || sameProfile(a, b);
 const validId = id => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id);
@@ -32,8 +40,7 @@ export function joinLink(device, input) {
   try {
     const invite = db.prepare('SELECT control_invites.* FROM control_invites JOIN devices ON devices.id=control_invites.device_id WHERE hash=? AND expires>? AND devices.revoked=0').get(hash(code), Date.now());
     if (!invite || invite.device_id === device.id) throw new HttpError(403, 'Invalid or expired link code');
-    const groupId = group(invite.device_id);
-    db.prepare('INSERT INTO control_groups VALUES (?,?) ON CONFLICT(device_id) DO UPDATE SET group_id=excluded.group_id').run(device.id, groupId);
+    joinGroups(device.id, invite.device_id);
     db.prepare('DELETE FROM control_invites WHERE hash=?').run(hash(code));
     db.exec('COMMIT');
   } catch(error) { db.exec('ROLLBACK'); throw error; }
@@ -63,8 +70,8 @@ export function pulse(device, input) {
   for (const [id,item] of presence) if (Date.now()-item.seen > 60000) { presence.delete(id); commands.delete(id); }
   return connectView(device);
 }
-// What a device sees: its linked devices online (Macs and phones, each can
-// control the other) and the commands waiting for it.
+// What a device sees: its linked devices online (any of them can control any
+// other) and the commands waiting for it.
 export function connectView(device) {
   const pending = (commands.get(device.id) || []).filter(item => item.expires > Date.now() && db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(item.sender) && related(item.sender, device.id));
   commands.set(device.id,pending);
@@ -86,9 +93,12 @@ export function unpair(device, input) {
   limit('unpair:' + device.id, 30);
   const other = String(input.id || '');
   if (!validId(other) || other === device.id || group(other) !== group(device.id)) return {ok:true};
-  // The device that joined the other's group leaves it; a group root stays where it is.
-  const leaving = group(other) !== other ? other : device.id;
-  db.prepare('DELETE FROM control_groups WHERE device_id=?').run(leaving);
+  // The other device leaves the group; the rest stay linked. A root leaving
+  // hands the group to this device.
+  if (group(other) === other) {
+    db.prepare('UPDATE control_groups SET group_id=? WHERE group_id=? AND device_id<>?').run(device.id, other, device.id);
+    db.prepare('DELETE FROM control_groups WHERE device_id=?').run(device.id);
+  } else db.prepare('DELETE FROM control_groups WHERE device_id=?').run(other);
   commands.delete(other); commands.delete(device.id);
   return {ok:true};
 }
@@ -118,9 +128,11 @@ export function sendCommand(device, input) {
   return {ok:true};
 }
 
-// Pairing without a code: a Mac is discoverable for a few minutes, a phone on
-// the same server sees it and asks, and the Mac accepts. Both show the same
-// four-digit code. Kept in memory; the phone asks again while it waits.
+// Pairing without a code: any device is discoverable for a few minutes,
+// another one on the same server sees it and asks, and the discoverable one
+// accepts. Both show the same four-digit code. Kept in memory; the asking
+// device asks again while it waits. (Before 0.2.17 only a Mac could be
+// discoverable; entries keep the old names: mac is the discoverable one.)
 const discoverable = new Map(), pairings = new Map();
 const isLive = id => db.prepare('SELECT id FROM devices WHERE id=? AND revoked=0').get(id);
 const pairCode = (mac, phone) => String(parseInt(hash(mac + phone).slice(0, 8), 16) % 10000).padStart(4, '0');
@@ -131,16 +143,14 @@ function prunePairing() {
 }
 function pairingView(device) {
   prunePairing();
-  const own = group(device.id), item = presence.get(device.id);
-  if (item?.platform === 'macos') return {
+  return {
     discoverableUntil:discoverable.get(device.id) || 0,
     pairRequests:[...pairings.values()].filter(entry => entry.mac === device.id && entry.status === 'pending' && isLive(entry.phone)).map(({phone,name,code}) => ({id:phone,name,code})),
+    nearby:[...discoverable.keys()].filter(id => id !== device.id && online(presence.get(id)) && !related(id, device.id) && isLive(id)).map(id => ({id,name:presence.get(id).name,platform:presence.get(id).platform})),
   };
-  return { nearby:[...discoverable.keys()].filter(id => id !== device.id && online(presence.get(id)) && !related(id, device.id) && isLive(id)).map(id => ({id,name:presence.get(id).name})) };
 }
 export function setDiscoverable(device, input) {
   limit('discoverable:' + device.id, 30);
-  if (presence.get(device.id)?.platform !== 'macos') throw new HttpError(400,'Only a Mac can be discoverable');
   if (input.on === true) discoverable.set(device.id, Date.now() + 5 * 60000); else discoverable.delete(device.id);
   return {discoverableUntil:discoverable.get(device.id) || 0};
 }
@@ -151,7 +161,7 @@ export function requestPair(device, input) {
   if (validId(mac) && group(mac) === group(device.id)) return {status:'approved'};
   const entry = pairings.get(key);
   if (entry) { entry.seen = Date.now(); return {status:entry.status, code:entry.code}; }
-  if (!validId(mac) || !discoverable.has(mac) || !online(presence.get(mac)) || !isLive(mac)) throw new HttpError(409,'That Mac is no longer discoverable. Make it discoverable again in Sterio on the Mac.');
+  if (!validId(mac) || !discoverable.has(mac) || !online(presence.get(mac)) || !isLive(mac)) throw new HttpError(409,'That device is no longer discoverable. Make it discoverable again in Sterio → Play on.');
   const created = {mac, phone:device.id, name:String(input.name || presence.get(device.id)?.name || device.name).slice(0,80), code:pairCode(mac, device.id), seen:Date.now(), status:'pending'};
   pairings.set(key, created);
   return {status:'pending', code:created.code};
@@ -159,10 +169,10 @@ export function requestPair(device, input) {
 export function decidePair(device, input) {
   limit('pair-decide:' + device.id, 60);
   const entry = pairings.get(device.id + '\0' + String(input.from || ''));
-  if (!entry || entry.status !== 'pending') throw new HttpError(404,'This request is no longer waiting. Ask the phone to pair again.');
+  if (!entry || entry.status !== 'pending') throw new HttpError(404,'This request is no longer waiting. Ask the other device to pair again.');
   if (input.accept === true) {
-    if (!isLive(entry.phone)) throw new HttpError(404,'That phone is no longer connected to this server');
-    db.prepare('INSERT INTO control_groups VALUES (?,?) ON CONFLICT(device_id) DO UPDATE SET group_id=excluded.group_id').run(entry.phone, group(device.id));
+    if (!isLive(entry.phone)) throw new HttpError(404,'That device is no longer connected to this server');
+    joinGroups(entry.phone, device.id);
   }
   Object.assign(entry, {status:input.accept === true ? 'approved' : 'declined', decided:Date.now()});
   if (input.accept === true) discoverable.delete(device.id);

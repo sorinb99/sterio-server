@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: ghcr.io/sorinb99/sterio-server:0.2.16
+    image: ghcr.io/sorinb99/sterio-server:0.2.17
     build: .
     container_name: sterio
     restart: unless-stopped
