@@ -21,7 +21,7 @@ listening history, builds Home mixes and links to other Sterio servers.
 Two ways to run it, same code:
 
 - **Docker on a NAS** (the user's: Ugreen, Intel N100, 4 cores, 8 GB) — image
-  `sterio-server:<version>`, `compose.yaml`, read-only root, `cap_drop: ALL`.
+  `ghcr.io/sorinb99/sterio-server:<version>` (and `:beta`), `compose.yaml`, read-only root, `cap_drop: ALL`.
 - **Sterio Server for Mac** — `deploy/mac/`: a Swift launcher app
   (`launcher/main.swift`) that bundles Node, ffmpeg/ffprobe/metaflac, starts
   `src/index.mjs` and restarts it on exit code 75; menu bar item; App Store /
@@ -133,6 +133,12 @@ family from the app's Library) and returns albums with any of them.
   `docker buildx build --platform linux/amd64 -t sterio-server:$V --load . && docker save sterio-server:$V | gzip > work/sterio-server-$V-linux-amd64.tar.gz`.
   The deliverable `builds/Sterio-Server-Docker-$V.zip` holds `compose.yaml`,
   `README.txt` and the tar.gz.
+- **Published image (since 0.2.15):** GitHub Container Registry, amd64 and arm64,
+  tagged with the version and `beta`:
+  `docker buildx build --builder practical_elion --platform linux/amd64,linux/arm64 -t ghcr.io/sorinb99/sterio-server:$V -t ghcr.io/sorinb99/sterio-server:beta --push .`
+  The user logs Docker in to ghcr.io (a token with `write:packages`; never
+  handle it). The package is public, the repository stays private; publish
+  only with the user's OK. Testers install with `docker compose pull`.
 - NAS deploy (`sorinb99@192.168.50.90`, `/volume1/docker/sterio-server`,
   data `/volume1/docker/sterio-server/data`, music `/volume2/data/media/music`).
   Run `work/deploy-nas.sh` (allowed for the agent since 2026-10-21; it

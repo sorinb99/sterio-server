@@ -6,23 +6,20 @@ A self-hosted server for Sterio, running in Docker. The music folder is mounted 
 
 **Verification:** images and clients are built separately. Automated tests were not run, at the user's request. The server is installed on the NAS, and DSD128 over DoP was verified manually on iPhone + Cayin RU9, including DSD confirmation on the DAC. Android/macOS require manual verification on hardware. The checklist is at the end.
 
-## 1. Choose the NAS architecture
+## 1. The image
 
-On the NAS, over SSH:
+The image is published on GitHub Container Registry for Intel/AMD (`x86_64`) and 64-bit ARM (`aarch64`) NAS devices; Docker picks the right one:
 
-```sh
-uname -m
+```
+ghcr.io/sorinb99/sterio-server:beta      # the latest beta
+ghcr.io/sorinb99/sterio-server:0.2.15    # one version
 ```
 
-- `x86_64`: the `sterio-server-0.1.2-linux-amd64.tar.gz` image (most Intel/AMD NAS devices).
-- `aarch64` / `arm64`: the `sterio-server-0.1.2-linux-arm64.tar.gz` image.
-- 32-bit ARM is not included.
-
-You do not need to publish the image to a registry; archives are provided for `docker load`. The server project lives separately in `/Users/sorinbottea/projects/sterio-server`. Sources are in `src/`, exported Docker images and the source package in `dist/`, and the Compose configuration and this README at the root. The client app stays in `/Users/sorinbottea/projects/sterio`.
+32-bit ARM is not included. The image holds only the protected build, never the source.
 
 ## 2. Prepare the files on the NAS
 
-Copy the `sterio-server/` directory to a location such as `/volume1/docker/sterio-server`, together with the matching Docker archive from `dist/`. The examples below use Synology paths; adjust them on QNAP/Unraid/TrueNAS.
+Make a folder such as `/volume1/docker/sterio-server` and put `compose.yaml` in it. The examples below use Synology paths; adjust them on QNAP/Unraid/TrueNAS.
 
 Find the UID/GID of the account that can read the collection:
 
@@ -64,39 +61,17 @@ Optional exception: the admin action **Split albums into tracks** writes, for ea
 
 Leave space for the database and cache. The cache limit is in MiB and applies to generated files, not to the original collection.
 
-## 3. Import the image
+## 3. Start the server
 
-For Intel/AMD NAS devices:
-
-```sh
-gunzip -c /path/to/sterio-server-0.1.2-linux-amd64.tar.gz | docker load
-docker tag sterio-server:0.1.2-amd64 sterio-server:0.1.2
-```
-
-For ARM64 NAS devices:
+In `compose.yaml`, `image:` names the image (`ghcr.io/sorinb99/sterio-server:beta` follows the beta). Then:
 
 ```sh
-gunzip -c /path/to/sterio-server-0.1.2-linux-arm64.tar.gz | docker load
-docker tag sterio-server:0.1.2-arm64 sterio-server:0.1.2
-```
-
-Then:
-
-```sh
+docker compose pull
 docker compose up -d --no-build
 docker compose logs -f sterio
 ```
 
-On older installations the command may be `docker-compose`. In Synology Container Manager you can import the image and create a Project from `compose.yaml`, in the directory that also contains `.env`.
-
-Alternatively, build directly on the NAS from source:
-
-```sh
-docker compose build
-docker compose up -d --no-build
-```
-
-The Dockerfile uses Node 24 and FFmpeg from the Debian image. There are no external npm dependencies. Building needs access to the Docker registry and the Debian repositories; an already imported image does not need internet access to run.
+On older installations the command may be `docker-compose`. In Synology or Ugreen Container Manager, create a Project from `compose.yaml`, in the directory that also contains `.env`; it pulls the image itself. A running server needs no internet access.
 
 ## 4. Indexing
 
@@ -187,10 +162,11 @@ Port 7766 now serves HTTPS and the app address is `https://music.example.com:776
 
 Keep `/data`: it holds the index, the server identity, authorized public keys, ticket secrets, favorites and the cache. The music lives in a separate folder. For a simple, consistent copy, stop the container before copying the data directory, then start it again.
 
-To update: import the new archive, apply the `sterio-server:0.1.2` tag as needed and recreate the container without removing the volume:
+To update: pull the new image and recreate the container; `/data` stays:
 
 ```sh
-docker compose up -d --no-build --force-recreate
+docker compose pull
+docker compose up -d --no-build
 ```
 
 Beta builds stop serving music 90 days after they were built, like a TestFlight build. The dashboard shows the date ("Beta until …"); after it, the app says the beta expired. Install the latest image to keep listening: your data and settings stay in `/data`.
