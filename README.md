@@ -12,7 +12,7 @@ The image is published on GitHub Container Registry for Intel/AMD (`x86_64`) and
 
 ```
 ghcr.io/sorinb99/sterio-server:beta      # the latest beta
-ghcr.io/sorinb99/sterio-server:0.2.18    # one version
+ghcr.io/sorinb99/sterio-server:0.2.19    # one version
 ```
 
 32-bit ARM is not included. The image holds only the protected build, never the source.
