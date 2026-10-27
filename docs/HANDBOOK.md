@@ -34,6 +34,8 @@ Two ways to run it, same code:
 | `MUSIC_DIR` | `/music` | Music folder (read-only unless `MUSIC_ACCESS=rw`; splitting needs rw) |
 | `DATA_DIR` | `/data` | Database, keys, artwork, cache |
 | `PORT` / `ADMIN_PORT` | 7766 / 7767 | App API / local admin dashboard |
+| `ADMIN_ALLOWED_NETWORKS` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Peer ranges the dashboard accepts (RFC1918 only). The default covers Docker Desktop's 172.x / 192.168.65.x gateway; who can reach the port is decided by `ADMIN_BIND_IP` |
+| `ADMIN_ALLOWED_HOSTS` | `127.0.0.1:7767,localhost:7767` | Host names accepted besides `localhost` and any private IPv4 address on any port, which are always accepted (a DNS-rebinding page can only send its own domain) |
 | `SERVER_NAME` | `Sterio NAS` | Name shown in the apps |
 | `SCAN_INTERVAL_SECONDS` | 3600 | Library rescan interval until an administrator picks one (`scan.intervalMinutes` setting: 0 off, 15, 60, 360, 1440; dashboard Library tab or the app's Server administration, `POST /api/scan/interval` / `/v1/admin/scan/interval`). `scanWhenDue` runs every minute and starts a scan once the interval has passed since `lastFinished`, so a manual scan resets the wait. A scan with no audio change rereads only CUE sheets and split markers that changed (`cueRead`, in memory; a dashboard rescan rereads all), so an idle library keeps its revision and the thumbnail warm-up (keyed on `libraryRevision()`) does not run again |
 | `MAX_PCM_RATE` | 192000 | Highest PCM rate of conversions |

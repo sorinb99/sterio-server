@@ -10,6 +10,15 @@ There is no account or password. The dashboard opens directly, but only for clie
 
 ## Local access configuration
 
+For a dashboard reachable from the home network, only two settings are needed (the server's LAN address as the bind IP):
+
+```dotenv
+ADMIN_ENABLED=true
+ADMIN_BIND_IP=192.168.50.90
+```
+
+Unset, `ADMIN_ALLOWED_NETWORKS` accepts every private range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), which includes Docker Desktop's gateway, and the Host check accepts localhost and any private IPv4 address. `ADMIN_ALLOWED_HOSTS` is only needed for a host name. The settings below narrow access explicitly:
+
 ```dotenv
 ADMIN_ENABLED=true
 ADMIN_BIND_IP=192.168.50.90
@@ -18,11 +27,11 @@ ADMIN_ALLOWED_NETWORKS=192.168.50.0/24
 ADMIN_ALLOWED_HOSTS=192.168.50.90:7767,127.0.0.1:7767,localhost:7767
 ```
 
-The Docker port is bound to the NAS LAN IP. The dedicated listener checks the actual peer address against the allowed LAN CIDR; it does not trust proxy headers. Only configured Host values are accepted. All changes require the exact same origin and a JSON request body.
+The Docker port is bound to the NAS LAN IP. The dedicated listener checks the actual peer address against the allowed LAN CIDR; it does not trust proxy headers. Hosts other than localhost or a private IPv4 address must be listed. All changes require the exact same origin and a JSON request body.
 
-### Docker Desktop on a Mac
+### Docker Desktop (Mac or Windows)
 
-Docker Desktop runs the container in a VM, so the browser's connection never arrives from 127.0.0.1. With the dashboard port published on 127.0.0.1, it arrives from the compose network gateway (a 172.16–31.x address, such as 172.19.0.1). The app port published on 0.0.0.0 sees 192.168.65.1 instead. Allow both:
+The defaults already allow this. Docker Desktop runs the container in a VM, so the browser's connection never arrives from 127.0.0.1. With the dashboard port published on 127.0.0.1, it arrives from the compose network gateway (a 172.16–31.x address, such as 172.19.0.1). The app port published on 0.0.0.0 sees 192.168.65.1 instead. To narrow the defaults, allow both:
 
 ```dotenv
 ADMIN_ENABLED=true

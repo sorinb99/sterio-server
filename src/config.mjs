@@ -13,7 +13,10 @@ export const config = {
   telemetry: { true: true, false: false }[String(process.env.TELEMETRY || '').toLowerCase()],
   adminPort: integer('ADMIN_PORT', 7767, 1, 65535),
   adminBind: process.env.ADMIN_BIND_ADDRESS || '0.0.0.0',
-  adminNetworks: (process.env.ADMIN_ALLOWED_NETWORKS || '').split(',').filter(Boolean),
+  // Unset, every private LAN range: the port binding decides who can reach the
+  // dashboard, and Docker Desktop delivers connections from its own 172.x or
+  // 192.168.65.x gateway rather than the browser's address.
+  adminNetworks: (process.env.ADMIN_ALLOWED_NETWORKS || '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16').split(',').filter(Boolean),
   adminHosts: (process.env.ADMIN_ALLOWED_HOSTS || '127.0.0.1:7767,localhost:7767').split(','),
   port: integer('PORT', 7766, 1, 65535),
   host: process.env.BIND_ADDRESS || '0.0.0.0',

@@ -256,7 +256,7 @@ Library scans reconcile minor album-tag differences within the same audio folder
 
 ## Local admin dashboard
 
-An optional English-language dashboard on a separate LAN-only port provides server statistics, library scans, album splitting, device roles and one-use device pairing codes. It has no account: access is restricted to the configured local and VPN networks. Setup and manual checks: [Local administration](deploy/nas/ADMIN.md). It is disabled by default; enable and configure the LAN binding explicitly. The public music API does not expose admin routes.
+An optional English-language dashboard on a separate LAN-only port provides server statistics, library scans, album splitting, device roles and one-use device pairing codes. It has no account: access is restricted to the configured local and VPN networks. Setup and manual checks: [Local administration](deploy/nas/ADMIN.md). It is disabled by default: set `ADMIN_ENABLED=true` and `ADMIN_BIND_IP` to the server's LAN address, then open `http://<that address>:7767`. Private networks and private-IP hosts are accepted by default, Docker Desktop's gateway included; `ADMIN_ALLOWED_NETWORKS` and `ADMIN_ALLOWED_HOSTS` narrow or extend that. The public music API does not expose admin routes.
 
 ## Fast FLAC/CUE start (0.1.14)
 

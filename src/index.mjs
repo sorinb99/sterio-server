@@ -58,7 +58,7 @@ async function handler(req,res) {
     const method = req.method;
     if (method === 'GET' && route === '/healthz') return json(res,200,{status:'ok',load:loadStats()});
     if (method === 'GET' && route === '/') return json(res,200,{name:'Sterio Server',message:'Connect with the Sterio app. Generate a pairing code using the NAS command line.',api:config.basePath+'/v1/info'});
-    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.18',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
+    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.19',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
     // An expired beta still answers info and health, so the app can say why.
     requireActiveBeta();
     // Only the address is needed: an administrator accepts the request on this server.

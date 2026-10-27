@@ -44,6 +44,13 @@ function localAddress(ip) {
     return (n & mask) === (base & mask);
   });
 }
+// A rebinding page can only send its own domain as Host, so localhost or a
+// private IPv4 address on any port is safe without listing it; names must be
+// listed in ADMIN_ALLOWED_HOSTS.
+function addressHost(host) {
+  const name = host.replace(/:\d{1,5}$/,'');
+  return name === 'localhost' || net.isIPv4(name) && /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(name);
+}
 async function input(req) {
   let size=0; const chunks=[];
   for await (const chunk of req) { size+=chunk.length; if(size>4096) throw new HttpError(413,'Request too large'); chunks.push(chunk); }
@@ -59,7 +66,7 @@ export function startAdmin() {
       if(!localAddress(req.socket.remoteAddress)) throw new HttpError(403,'Local network access only');
       // Ignore all forwarding headers: this listener must never trust a proxy.
       const host=req.headers.host || '';
-      if(!config.adminHosts.includes(host)) throw new HttpError(403,'Invalid admin host');
+      if(!config.adminHosts.includes(host) && !addressHost(host)) throw new HttpError(403,'Invalid admin host');
       limit('admin:'+req.socket.remoteAddress,180);
       noteLan(req,config.port);
       const route=new URL(req.url,'http://localhost').pathname;
