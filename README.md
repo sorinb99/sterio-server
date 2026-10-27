@@ -482,7 +482,7 @@ The Mac server also has a Mac App Store build (`deploy/mac/build-dmg.sh --app-st
 
 ## 0.1.44: connect with the address only, accept on the server
 
-An app or another server no longer needs a pairing code or server key. It sends a connection request with its device key (`POST /v1/auth/request`, `POST /v1/peers/request`) and asks again every few seconds while it waits. The request appears at the top of the dashboard's Home and, for admin devices, in the app's Server administration; both sides show the same four-digit code. Accept registers the key exactly as a code would; Decline answers the requester and is remembered for five minutes. Requests are kept in memory and disappear two minutes after the requester stops asking. On a Mac, a new request opens the dashboard. Pairing codes and server keys keep working.
+An app or another server no longer needs a pairing code or server key. It sends a connection request with its device key (`POST /v1/auth/request`, `POST /v1/peers/request`) and asks again every few seconds while it waits. The request appears at the top of the dashboard's Home and, for admin devices, in the app's Server administration; both sides show the same four-digit code. Accept registers the key exactly as a code would; Decline answers the requester once; asking again (Connect on the phone) starts a new request. A decline the requester never heard is dropped after five minutes. Requests are kept in memory and disappear two minutes after the requester stops asking. On a Mac, a new request opens the dashboard. Pairing codes and server keys keep working.
 
 ### 0.1.45: app connection requests reach the server
 

@@ -16,7 +16,7 @@ const codeOf = id => String(parseInt(id.slice(0, 8), 16) % 10000).padStart(4, '0
 function prune() {
   const now = Date.now();
   for (const [id, entry] of requests) {
-    // A requester that stopped asking gave up; a decision is kept a few minutes.
+    // A requester that stopped asking gave up; a decline it never heard is kept a few minutes.
     if (entry.status === 'pending' ? now - entry.seen > 2 * 60000 || now - entry.created > 30 * 60000 : now - entry.decided > 5 * 60000) requests.delete(id);
   }
 }
@@ -29,7 +29,8 @@ export function requestAccess(kind, body, address) {
   if (accepted(kind, parsed.id)) return { status: 'approved' };
   prune();
   let entry = requests.get(parsed.id);
-  if (entry?.status === 'declined') return { status: 'declined' };
+  // The waiting requester hears the decline once; asking again starts a new request.
+  if (entry?.status === 'declined') { requests.delete(parsed.id); return { status: 'declined' }; }
   if (!entry || entry.kind !== kind) {
     if ([...requests.values()].filter(item => item.status === 'pending').length >= 30) throw new HttpError(429, 'Too many connection requests are waiting. Try again later.');
     const now = Date.now();
