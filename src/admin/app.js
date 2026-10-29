@@ -20,6 +20,7 @@ async function refresh(silent=false) {
     // TELEMETRY=false in .env wins over the dashboard.
     $('telemetry').checked=s.telemetry.enabled;$('telemetry').disabled=s.telemetry.locked;
     if(!s.telemetry.asked&&!$('telemetry-ask').open)$('telemetry-ask').showModal();
+    $('update').hidden=!s.update;if(s.update)$('update-title').textContent=`Sterio Server ${s.update.latest} is out (this one is ${s.version})`;
     $('system').textContent=`Server ${s.version}${s.betaExpires?(s.betaExpired?` · Beta expired ${s.betaExpires}, install the latest version`:` · Beta until ${s.betaExpires}`):''} · ${number(s.files)} audio files · ${(s.bytes/1024**3).toFixed(1)} GB indexed · ${(s.memory/1024**2).toFixed(0)} MB memory · Uptime ${Math.floor(s.uptime/3600)}h ${Math.floor(s.uptime%3600/60)}m`;
     await refreshLive();
     await refreshReport();

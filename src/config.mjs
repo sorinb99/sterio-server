@@ -11,6 +11,8 @@ export const config = {
   // Anonymous daily usage stats (telemetry.mjs): true or false answers the
   // dashboard's question for good; unset, the dashboard asks.
   telemetry: { true: true, false: false }[String(process.env.TELEMETRY || '').toLowerCase()],
+  // UPDATE_CHECK=false stops the dashboard's new-version notice (updates.mjs).
+  updateCheck: String(process.env.UPDATE_CHECK || '').toLowerCase() !== 'false',
   adminPort: integer('ADMIN_PORT', 7767, 1, 65535),
   adminBind: process.env.ADMIN_BIND_ADDRESS || '0.0.0.0',
   // Unset, every private LAN range: the port binding decides who can reach the

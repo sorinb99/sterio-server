@@ -1,6 +1,6 @@
 services:
   sterio:
-    image: ghcr.io/sorinb99/sterio-server:0.2.22
+    image: ghcr.io/sorinb99/sterio-server:0.2.23
     build: .
     container_name: sterio
     restart: unless-stopped
@@ -26,6 +26,7 @@ services:
       TRANSCODE_WORKERS: "${TRANSCODE_WORKERS:-}"
       SPLIT_WORKERS: "${SPLIT_WORKERS:-}"
       TELEMETRY: "${TELEMETRY:-}"
+      UPDATE_CHECK: "${UPDATE_CHECK:-}"
     volumes:
       - "${MUSIC_PATH:?Set MUSIC_PATH in .env}:/music:${MUSIC_ACCESS:-ro}"
       - "${DATA_PATH:?Set DATA_PATH in .env}:/data"

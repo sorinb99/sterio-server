@@ -12,7 +12,7 @@ The image is published on GitHub Container Registry for Intel/AMD (`x86_64`) and
 
 ```
 ghcr.io/sorinb99/sterio-server:beta      # the latest beta
-ghcr.io/sorinb99/sterio-server:0.2.22    # one version
+ghcr.io/sorinb99/sterio-server:0.2.23    # one version
 ```
 
 32-bit ARM is not included. The image holds only the protected build, never the source.
@@ -170,6 +170,8 @@ docker compose up -d --no-build
 ```
 
 Usage stats: the first time you open the dashboard, it asks whether the server may say hi once a day. With a yes it sends a random id, the version and the platform (Docker or Mac, Intel or ARM); no IP address is kept and nothing about your music leaves your network. Change it at the bottom of the dashboard, or set `TELEMETRY=false` (or `true`) in `.env`.
+
+Updates: on Docker the dashboard shows a card when a newer Sterio Server image is out, with the command to install it (`docker compose pull && docker compose up -d`, in the folder with `compose.yaml`). The server never updates or restarts itself. While the dashboard is open it reads the public tag list on ghcr.io at most every six hours and sends nothing about your server. `UPDATE_CHECK=false` in `.env` turns it off.
 
 Beta builds stop serving music 90 days after they were built, like a TestFlight build. The dashboard shows the date ("Beta until …"); after it, the app says the beta expired. Install the latest image to keep listening: your data and settings stay in `/data`.
 
@@ -563,3 +565,9 @@ the Docker image or the Mac app. Behaviour is unchanged.
   the background then pulses every 30 seconds instead of every 6, so its radio
   can rest on mobile data. Every change (track, play, pause, seek) still goes
   out at once. Older apps keep pulsing as before.
+
+## 0.2.23
+
+- The dashboard says when a newer Sterio Server image is out, with the command
+  that installs it. Docker only; the server never updates itself.
+  `UPDATE_CHECK=false` in `.env` turns it off.
