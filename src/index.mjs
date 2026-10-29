@@ -9,7 +9,7 @@ import { requestAccess } from './requests.mjs';
 import { migrateSplitFolders } from './split.mjs';
 import { updateDeviceNickname, recordPlayback, rememberDelivery, trackTransfer } from './reporting.mjs';
 import { createLink, joinLink, pulse, sendCommand, decidePair, requestPair, setDiscoverable, unpair } from './connect.mjs';
-import { acceptSocket, closeSockets } from './socket.mjs';
+import { acceptSocket, closeSockets, notifyTarget } from './socket.mjs';
 import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, listPlaylists, sharePlaylist, updatePlaylist } from './playlists.mjs';
 import { createProfileLink, joinProfile, leaveProfile, marks, profileDevices, profileView, renameProfile } from './profiles.mjs';
 import { addRenderer, controlRenderer, discoverRenderers, externalItem, listRenderers, noteLan, lanServerBase, playOnRenderer, publicBase, removeRenderer, streamBase } from './renderers.mjs';
@@ -58,7 +58,7 @@ async function handler(req,res) {
     const method = req.method;
     if (method === 'GET' && route === '/healthz') return json(res,200,{status:'ok',load:loadStats()});
     if (method === 'GET' && route === '/') return json(res,200,{name:'Sterio Server',message:'Connect with the Sterio app. Generate a pairing code using the NAS command line.',api:config.basePath+'/v1/info'});
-    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.19',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
+    if (method === 'GET' && route === '/v1/info') return json(res,200,{ provider:'sterio',version:'0.2.21',apiVersion:1,betaExpires:betaExpires?.toISOString() ?? null,serverId,name:config.name,authentication:'P256-SHA256',dsd:'Original DSF/DFF with explicitly authorized server FLAC fallback',dsdPcmFallback:true,losslessFlacCompatibility:true,remoteControl:true,discovery:true,artworkThumbnails:true,radioLikes:true,administration:true,peers:true,renderers:true,phoneStreamers:true,formatFilter:true,connectSocket:true,accessRequests:true,macPairing:true,unpair:true,deviceRemoval:true });
     // An expired beta still answers info and health, so the app can say why.
     requireActiveBeta();
     // Only the address is needed: an administrator accepts the request on this server.
@@ -129,7 +129,7 @@ async function handler(req,res) {
     if (method === 'POST' && route === '/v1/connect/pair-decide') return json(res,200,decidePair(device,await body(req)));
     if (method === 'POST' && route === '/v1/connect/unpair') return json(res,200,unpair(device,await body(req)));
     if (method === 'POST' && route === '/v1/connect/pulse') { const input=await body(req); updateDeviceNickname(device,input); return json(res,200,{...pulse(device,input),lanBase:lanServerBase()}); }
-    if (method === 'POST' && route === '/v1/connect/command') return json(res,200,sendCommand(device,await body(req)));
+    if (method === 'POST' && route === '/v1/connect/command') { const command=await body(req); const result=sendCommand(device,command); notifyTarget(command); return json(res,200,result); }
     if (method === 'GET' && route === '/v1/renderers') return json(res,200,listRenderers(url.searchParams.get('queue'),device.id));
     if (method === 'POST' && route === '/v1/renderers') { limit('renderer-add:' + device.id,20); return json(res,200,await addRenderer(await body(req),streamBase(req),device.id)); }
     if (method === 'GET' && route === '/v1/renderers/discover') { limit('renderer-discover:' + device.id,20); return json(res,200,await discoverRenderers(String(req.headers.host || '').replace(/:\d+$/,''),device.id)); }

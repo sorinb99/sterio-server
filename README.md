@@ -547,3 +547,10 @@ the Docker image or the Mac app. Behaviour is unchanged.
 - Albums ripped as one file per track with a CUE sheet beside them (EAC's multi-file layout) play their files directly. Before, each file was treated as a chapter of an image and cut from itself, a full re-encode on first play. Such tracks saved earlier as favorites or in playlists are listed under the files' own ids, so add them again.
 - The scan every 15 minutes rereads only the CUE sheets and split folders that changed. When nothing changed the library keeps its revision, so apps don't reload it and the artwork thumbnails are not checked again (that took about 20 seconds after every scan).
 - A long stream no longer leaves a listener behind each time the network is slower than the file (the `MaxListenersExceededWarning` in the log).
+
+## 0.2.21
+
+- Play on: a command sent over HTTP (a phone whose WebSocket is not open, for
+  example on mobile data behind a proxy without WebSockets) reaches the Mac at
+  once, as over the socket. Before, it waited for the Mac's next pulse, up to
+  6 seconds.

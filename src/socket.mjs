@@ -79,7 +79,7 @@ function handle(client, message) {
     try {
       sendCommand(client.device, message.command || {});
       send(client, { type: 'commandResult', requestId: message.requestId });
-      for (const target of sockets) if (target.device?.id === message.command.target) send(target, { type: 'pulse', ...connectView(target.device) });
+      notifyTarget(message.command);
     } catch (error) {
       send(client, { type: 'commandResult', requestId: message.requestId, error: error.status ? error.message : 'Remote command failed' });
     }
@@ -135,5 +135,13 @@ export function acceptSocket(req, socket, basePath) {
   socket.on('data', chunk => receive(client, chunk));
   socket.on('error', () => close(client));
   socket.on('close', () => { client.closed = true; if (sockets.delete(client)) load.socket(-1); clearInterval(client.ping); });
+}
+// A command reaches the device it is for at once, however it was sent (this
+// socket or an HTTP request from a phone whose socket is not open).
+export function notifyTarget(command) {
+  for (const target of sockets) {
+    if (!target.device || target.device.id !== command?.target) continue;
+    try { send(target, { type: 'pulse', ...connectView(target.device) }); } catch {}
+  }
 }
 export function closeSockets() { for (const client of [...sockets]) close(client, 1001); }
