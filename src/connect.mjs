@@ -10,7 +10,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS control_groups (device_id TEXT PRIMARY KEY, 
 CREATE TABLE IF NOT EXISTS control_invites (hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, expires INTEGER NOT NULL);`);
 const presence = new Map(), commands = new Map();
 const group = id => db.prepare('SELECT group_id FROM control_groups WHERE device_id=?').get(id)?.group_id || id;
-const online = item => item && Date.now() - item.seen < 12000;
+// A device is listed 12 s after its last pulse, or 45 s while its pulses come
+// over an open socket: a phone playing in the background then pulses every
+// 30 s instead of every 6 s (it tells every change at once anyway), so its
+// radio can rest. A closed socket ends the longer window.
+const online = item => item && Date.now() - item.seen < (item.socket ? 45000 : 12000);
 // Linking joins two groups whole, so any number of devices (Macs, iPhones,
 // iPads, Android) end up in one group and all see and control each other.
 function joinGroups(joining, host) {
@@ -67,19 +71,24 @@ function signalPath(value) {
   })).filter(stage => stage.label);
   return stages.length ? { intro:text(value.intro, 300), stages, bitPerfect:text(value.bitPerfect, 400), ...(value.rateWarning ? { rateWarning:text(value.rateWarning, 300) } : {}) } : null;
 }
-export function pulse(device, input) {
+export function pulse(device, input, viaSocket = false) {
   const state = input.state || {};
   const trackIds = ids(state.trackIds || []);
   const index = Number.isInteger(state.index) && state.index >= 0 && state.index < trackIds.length ? state.index : 0;
   const status = ['idle','buffering','playing','paused','interrupted','ended','error'].includes(state.status) ? state.status : 'idle';
   if (presence.get(device.id)?.instance !== input.instance) commands.delete(device.id);
-  presence.set(device.id, {instance:String(input.instance||'').slice(0,80),id:device.id, name:String(input.name || device.name).slice(0,80), platform:input.platform === 'macos' ? 'macos' : 'mobile', seen:Date.now(),
+  presence.set(device.id, {instance:String(input.instance||'').slice(0,80),id:device.id, name:String(input.name || device.name).slice(0,80), platform:input.platform === 'macos' ? 'macos' : 'mobile', seen:Date.now(), socket:viaSocket,
     state:{trackIds,index,status,position:Math.max(0,Math.min(604800,Number(state.position)||0)),duration:Math.max(0,Math.min(604800,Number(state.duration)||0)),route:String(state.route || 'System output').slice(0,120),error:state.error ? String(state.error).slice(0,200) : null,signal:signalPath(state.signal)}});
   observePulse(device,presence.get(device.id).state,input.platform === 'macos' ? 'macos' : 'mobile');
   const ack = new Set(Array.isArray(input.ack) ? input.ack.slice(0,32) : []);
   commands.set(device.id,(commands.get(device.id) || []).filter(item => !ack.has(item.id)));
   for (const [id,item] of presence) if (Date.now()-item.seen > 60000) { presence.delete(id); commands.delete(id); }
-  return connectView(device);
+  return viaSocket ? {...connectView(device), socketPresence:45000} : connectView(device);
+}
+// The device's socket closed: back to the 12-second window.
+export function socketClosed(deviceId) {
+  const item = presence.get(deviceId);
+  if (item) item.socket = false;
 }
 // What a device sees: its linked devices online (any of them can control any
 // other) and the commands waiting for it.

@@ -12,7 +12,7 @@ The image is published on GitHub Container Registry for Intel/AMD (`x86_64`) and
 
 ```
 ghcr.io/sorinb99/sterio-server:beta      # the latest beta
-ghcr.io/sorinb99/sterio-server:0.2.19    # one version
+ghcr.io/sorinb99/sterio-server:0.2.22    # one version
 ```
 
 32-bit ARM is not included. The image holds only the protected build, never the source.
@@ -554,3 +554,12 @@ the Docker image or the Mac app. Behaviour is unchanged.
   example on mobile data behind a proxy without WebSockets) reaches the Mac at
   once, as over the socket. Before, it waited for the Mac's next pulse, up to
   6 seconds.
+
+## 0.2.22
+
+- Play on: a device whose pulses come over its open WebSocket stays listed
+  45 seconds after the last one, instead of 12 (12 again once its last socket
+  closes). The pulse answer says so (`socketPresence`), and a phone playing in
+  the background then pulses every 30 seconds instead of every 6, so its radio
+  can rest on mobile data. Every change (track, play, pause, seek) still goes
+  out at once. Older apps keep pulsing as before.

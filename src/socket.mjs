@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { db, hash } from './db.mjs';
 import { limit } from './auth.mjs';
-import { connectView, pulse, related, sendCommand } from './connect.mjs';
+import { connectView, pulse, related, sendCommand, socketClosed } from './connect.mjs';
 import { requestListeners } from './requests.mjs';
 import { updateDeviceNickname } from './reporting.mjs';
 import { load } from './load.mjs';
@@ -26,11 +26,17 @@ function frame(opcode, payload = Buffer.alloc(0)) {
 function send(client, message) {
   if (!client.socket.destroyed) client.socket.write(frame(1, Buffer.from(JSON.stringify(message))));
 }
+// The device's last socket closed: it is listed by its HTTP pulses again.
+function released(client) {
+  if (!client.device || [...sockets].some(other => other.device?.id === client.device.id)) return;
+  socketClosed(client.device.id);
+}
 function close(client, code = 1000) {
   if (client.closed) return;
   client.closed = true;
   if (sockets.delete(client)) load.socket(-1);
   clearInterval(client.ping);
+  released(client);
   const payload = Buffer.alloc(2); payload.writeUInt16BE(code);
   try { client.socket.end(frame(8, payload)); } catch {}
   setTimeout(() => client.socket.destroy(), 1000).unref();
@@ -70,7 +76,7 @@ function handle(client, message) {
   if (message.type === 'pulse') {
     const input = message.pulse || {};
     updateDeviceNickname(client.device, input);
-    send(client, { type: 'pulse', ...pulse(client.device, input) });
+    send(client, { type: 'pulse', ...pulse(client.device, input, true) });
     // A device's new state goes straight to the devices controlling it.
     notifyGroup(client.device);
     return;
@@ -134,7 +140,7 @@ export function acceptSocket(req, socket, basePath) {
   client.ping.unref();
   socket.on('data', chunk => receive(client, chunk));
   socket.on('error', () => close(client));
-  socket.on('close', () => { client.closed = true; if (sockets.delete(client)) load.socket(-1); clearInterval(client.ping); });
+  socket.on('close', () => { client.closed = true; if (sockets.delete(client)) load.socket(-1); clearInterval(client.ping); released(client); });
 }
 // A command reaches the device it is for at once, however it was sent (this
 // socket or an HTTP request from a phone whose socket is not open).
