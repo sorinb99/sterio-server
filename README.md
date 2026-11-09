@@ -571,3 +571,11 @@ the Docker image or the Mac app. Behaviour is unchanged.
 - The dashboard says when a newer Sterio Server image is out, with the command
   that installs it. Docker only; the server never updates itself.
   `UPDATE_CHECK=false` in `.env` turns it off.
+
+## 0.2.24
+
+- Streamers: a BluOS player that goes on with its own play queue when a
+  track ends (it played something unrelated after the first track of an
+  album) now gets the next track of the album instead. Something else started
+  earlier in a track still means another app took the streamer, and Sterio
+  lets it go.

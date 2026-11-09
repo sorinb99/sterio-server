@@ -425,9 +425,13 @@ async function poll(session) {
       session.position = state.position; report(session,'start');
       void queueNext(session, epoch);
     }
-    // Another app started something else on the streamer: let it go.
+    // Something else on the streamer. At the end of our track it is the
+    // streamer moving on by itself (a BluOS player goes on with its own play
+    // queue after a URL ends): our next track replaces it. Earlier, another
+    // app started something: let it go.
     const ours = item => item && state.uri.includes(item.stream);
     if (state.uri && state.state === 'playing' && Date.now() - session.loadedAt > 10000 && session.current && !ours(session.current) && !ours(session.next)) {
+      if (session.status === 'playing' && session.duration > 0 && session.position >= session.duration - 6 && session.index + 1 < session.queue.length) return await advance(session, 1);
       report(session,'stop'); session.epoch++; session.status = 'stopped'; session.error = null; return;
     }
     if (state.state === 'playing' && session.pendingSeek !== null) { const target = session.pendingSeek; session.pendingSeek = null; await driver.seek(renderer, target); return; }
